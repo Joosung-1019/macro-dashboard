@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>매크로 지표 데스크</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,500;0,600;0,700;1,500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #eef1f5;
+    --surface: #ffffff;
+    --surface-2: #f5f7fa;
+    --border: #d7dce4;
+    --ink: #141b2b;
+    --ink-2: #4d5768;
+    --ink-3: #7c8698;
+    --accent: #0e6b66;
+    --accent-ink: #ffffff;
+    --accent-soft: #e2f0ee;
+    --navy: #1c2c4a;
+
+    --good: #1f7a4d;
+    --good-bg: #e4f3ea;
+    --warn: #92610f;
+    --warn-bg: #faf1dd;
+    --critical: #a4372b;
+    --critical-bg: #fbe8e5;
+    --info: #3c5a7a;
+    --info-bg: #e8eef5;
+    --todo: #5b5f6b;
+    --todo-bg: #eceef2;
+
+    --shadow: 0 1px 2px rgba(20, 27, 43, 0.06);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1420;
+      --surface: #161d2c;
+      --surface-2: #131928;
+      --border: #28324a;
+      --ink: #e8ebf1;
+      --ink-2: #b7c0d1;
+      --ink-3: #8892a6;
+      --accent: #55c2b8;
+      --accent-ink: #06201d;
+      --accent-soft: #142826;
+      --navy: #a9bde0;
+
+      --good: #57c78a;
+      --good-bg: #12301f;
+      --warn: #e0b25a;
+      --warn-bg: #362a10;
+      --critical: #e2766a;
+      --critical-bg: #391b17;
+      --info: #8db1d9;
+      --info-bg: #16233a;
+      --todo: #a3aabb;
+      --todo-bg: #1c2333;
+
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0f1420;
+    --surface: #161d2c;
+    --surface-2: #131928;
+    --border: #28324a;
+    --ink: #e8ebf1;
+    --ink-2: #b7c0d1;
+    --ink-3: #8892a6;
+    --accent: #55c2b8;
+    --accent-ink: #06201d;
+    --accent-soft: #142826;
+    --navy: #a9bde0;
+
+    --good: #57c78a;
+    --good-bg: #12301f;
+    --warn: #e0b25a;
+    --warn-bg: #362a10;
+    --critical: #e2766a;
+    --critical-bg: #391b17;
+    --info: #8db1d9;
+    --info-bg: #16233a;
+    --todo: #a3aabb;
+    --todo-bg: #1c2333;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", "Malgun Gothic", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  .masthead-bar {
+    height: 4px;
+    border-radius: 3px;
+    margin-bottom: 20px;
+    background: linear-gradient(90deg, var(--accent), var(--navy) 70%, transparent);
+  }
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 20px;
+    padding-bottom: 22px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 18px;
+  }
+
+  .kicker {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 8px;
+  }
+
+  h1 {
+    font-family: "Newsreader", Georgia, serif;
+    font-weight: 600;
+    font-size: clamp(28px, 4vw, 38px);
+    margin: 0;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+
+  .header-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 7px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+    color: var(--ink-2);
+  }
+
+  .header-meta .sched,
+  .header-meta .updated-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .header-meta .sched {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .header-meta .sched::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .header-meta .updated-chip {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--ink-2);
+    font-weight: 500;
+  }
+  .header-meta .updated-chip b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- Quick nav ---------- */
+  .quicknav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 26px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .quicknav a {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    color: var(--ink-2);
+    text-decoration: none;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: var(--surface);
+    transition: color .15s, border-color .15s, background .15s, transform .15s;
+  }
+  .quicknav a:hover { color: var(--accent-ink); border-color: var(--accent); background: var(--accent); transform: translateY(-1px); }
+
+  /* ---------- Summary strip ---------- */
+  .summary-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .summary-row .summary-label {
+    font-size: 12px;
+    color: var(--ink-3);
+    margin-right: 2px;
+  }
+
+  .status-count {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+    color: var(--ink-2);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: var(--surface);
+  }
+  .status-count b { color: var(--ink); font-weight: 600; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .dot.good { background: var(--good); }
+  .dot.warn { background: var(--warn); }
+  .dot.critical { background: var(--critical); }
+  .dot.todo { background: var(--todo); }
+
+  .hero-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 20px 0 44px;
+    box-shadow: var(--shadow);
+  }
+
+  .hero-tile {
+    background: var(--surface);
+    padding: 20px 20px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    position: relative;
+  }
+  .hero-tile::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent);
+    opacity: .55;
+  }
+
+  .hero-tile .label {
+    font-size: 12.5px;
+    color: var(--ink-2);
+    font-weight: 500;
+  }
+
+  .hero-tile .value {
+    font-family: "IBM Plex Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 27px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .hero-tile .value .unit {
+    font-size: 14px;
+    color: var(--ink-3);
+    font-weight: 500;
+    margin-left: 2px;
+  }
+
+  .hero-tile .sub {
+    font-size: 11.5px;
+    color: var(--ink-3);
+  }
+
+  /* ---------- Sections ---------- */
+  section.group {
+    margin-bottom: 46px;
+    scroll-margin-top: 18px;
+  }
+
+  .group-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    border-bottom: 1px solid var(--ink);
+    padding-bottom: 9px;
+    margin-bottom: 16px;
+  }
+
+  .group-head .idx {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    color: var(--accent-ink);
+    background: var(--accent);
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-weight: 600;
+  }
+
+  .group-head h2 {
+    font-family: "Newsreader", Georgia, serif;
+    font-weight: 600;
+    font-style: italic;
+    font-size: 21px;
+    margin: 0;
+    color: var(--navy);
+  }
+
+  .group-head .group-note {
+    font-size: 12px;
+    color: var(--ink-3);
+  }
+
+  .subhead {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 22px 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .subhead:first-of-type { margin-top: 0; }
+  .subhead::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: var(--accent); flex: none; }
+  .subhead::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+  .tile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+    gap: 12px;
+  }
+
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 15px 13px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: transform .15s, box-shadow .15s, border-color .15s;
+  }
+  .tile:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent);
+    box-shadow: 0 8px 20px rgba(20, 27, 43, 0.10);
+  }
+
+  .tile-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .tile-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1.35;
+  }
+
+  .tile-label .code {
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 400;
+    color: var(--ink-3);
+    font-size: 11px;
+    display: block;
+    margin-top: 1px;
+  }
+
+  .pill {
+    flex: none;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px;
+    font-weight: 600;
+    padding: 3px 7px;
+    border-radius: 20px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; }
+  .pill.good { background: var(--good-bg); color: var(--good); }
+  .pill.good::before { background: var(--good); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .pill.warn::before { background: var(--warn); }
+  .pill.critical { background: var(--critical-bg); color: var(--critical); }
+  .pill.critical::before { background: var(--critical); }
+  .pill.info { background: var(--info-bg); color: var(--info); }
+  .pill.info::before { background: var(--info); }
+  .pill.todo { background: var(--todo-bg); color: var(--todo); }
+  .pill.todo::before { background: var(--todo); }
+
+  .tile .value {
+    font-family: "IBM Plex Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .tile .value .unit {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-3);
+    margin-left: 3px;
+  }
+  /* Clickable CTA used in place of a value when a figure must be checked at the source */
+  .goto-btn {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 14px;
+    border-radius: 20px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    line-height: 1;
+    transition: background .15s, color .15s, transform .15s, box-shadow .15s;
+  }
+  .goto-btn::after {
+    content: "↗";
+    font-size: 13px;
+    transition: transform .15s;
+  }
+  .goto-btn:hover {
+    background: var(--accent);
+    color: var(--accent-ink);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(14, 107, 102, 0.25);
+  }
+  .goto-btn:hover::after { transform: translate(2px, -2px); }
+  .goto-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .tile .note {
+    font-size: 12px;
+    color: var(--ink-2);
+    line-height: 1.5;
+  }
+
+  /* 30-day trailing average comparison */
+  .trend-line {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .trend-flag {
+    font-family: "IBM Plex Sans", sans-serif;
+    font-weight: 700;
+    font-size: 10.5px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    background: var(--warn-bg);
+    color: var(--warn);
+  }
+  .trend-flag.up { background: var(--good-bg); color: var(--good); }
+  .trend-flag.down { background: var(--critical-bg); color: var(--critical); }
+
+  /* Change vs. previous reading — Korean market convention: 상승(오름)=빨강, 하락(내림)=파랑 */
+  .delta-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+    vertical-align: middle;
+    margin-left: 6px;
+    white-space: nowrap;
+  }
+  .delta-chip.up { background: var(--critical-bg); color: var(--critical); }
+  .delta-chip.down { background: var(--info-bg); color: var(--info); }
+  .delta-chip.flat { background: var(--todo-bg); color: var(--todo); }
+  .delta-chip.first { background: var(--todo-bg); color: var(--todo); font-weight: 500; }
+  .check-right .delta-chip { margin-left: 0; }
+
+  .tile .meta {
+    margin-top: auto;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--ink-3);
+    font-family: "IBM Plex Mono", monospace;
+  }
+
+  .tile .meta a { color: var(--accent); text-decoration: none; }
+  .tile .meta a:hover { text-decoration: underline; }
+  .tile .meta a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  /* ---------- Checklist (금리 체크리스트 / 고용관련지표) ---------- */
+  .check-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .check-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    transition: transform .15s, box-shadow .15s;
+  }
+  .check-row:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px rgba(20, 27, 43, 0.10);
+  }
+  .check-row.good { border-left-color: var(--good); }
+  .check-row.warn { border-left-color: var(--warn); }
+  .check-row.critical { border-left-color: var(--critical); }
+  .check-row.todo { border-left-color: var(--todo); }
+
+  .check-left { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .check-left .check-label { font-size: 13px; font-weight: 600; }
+  .check-left .check-crit { font-size: 11.5px; color: var(--ink-3); }
+
+  .check-right { display: flex; align-items: center; gap: 10px; flex: none; }
+  .check-right .check-value {
+    font-family: "IBM Plex Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 17px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  /* ---------- Link chips (리서치 바로가기) ---------- */
+  .link-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .link-chip {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--accent);
+    text-decoration: none;
+    background: var(--surface);
+    transition: background .15s, border-color .15s, transform .15s;
+  }
+  .link-chip b {
+    color: var(--ink);
+    font-weight: 600;
+    margin-right: 5px;
+    font-family: "IBM Plex Sans", sans-serif;
+  }
+  .link-chip:hover { background: var(--accent-soft); border-color: var(--accent); transform: translateY(-1px); }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+    font-size: 11.5px;
+    color: var(--ink-3);
+    line-height: 1.7;
+  }
+
+  @media (max-width: 900px) {
+    .hero-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 560px) {
+    .hero-grid { grid-template-columns: 1fr; }
+    .header-meta { text-align: left; }
+    header { flex-direction: column; align-items: flex-start; }
+    .check-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead-bar"></div>
+
+  <header>
+    <div>
+      <p class="kicker">Personal Macro Watch</p>
+      <h1>매크로 지표 데스크</h1>
+    </div>
+    <div class="header-meta">
+      <span class="sched">매일 오전 9:00 자동 갱신</span>
+      <span class="updated-chip">마지막 갱신 <b>2026-08-23 09:02</b> (KST)</span>
+    </div>
+  </header>
+
+  <nav class="quicknav">
+    <a href="#ind">01 지표업데이트</a>
+    <a href="#rate-check">02 금리 체크리스트</a>
+    <a href="#employment">03 고용관련지표</a>
+  </nav>
+
+  <div class="hero-grid">
+    <div class="hero-tile">
+      <span class="label">원/달러 환율</span>
+      <span class="value">1,387.3<span class="unit">KRW</span><span class="delta-chip up">▲ +5.6</span></span>
+      <span class="sub">2026-08-22 기준 · 전일 대비</span>
+    </div>
+    <div class="hero-tile">
+      <span class="label">美 10Y–2Y 금리차</span>
+      <span class="value">+0.55<span class="unit">%p</span><span class="delta-chip down">▼ -0.36%p</span></span>
+      <span class="sub">양(+) · 역전 아님 · 침체 예고 신호 없음</span>
+    </div>
+    <div class="hero-tile">
+      <span class="label">VIX 공포지수</span>
+      <span class="value">15.13<span class="unit">pt</span><span class="delta-chip down">▼ -0.88</span></span>
+      <span class="sub">20 미만 · 안정 구간 · 전일 대비</span>
+    </div>
+    <div class="hero-tile">
+      <span class="label">연준 기준금리</span>
+      <span class="value">3.50–3.75<span class="unit">%</span><span class="delta-chip flat">동결</span></span>
+      <span class="sub">2026-07-29 FOMC 동결</span>
+    </div>
+  </div>
+
+  <!-- 01 지표업데이트 -->
+  <section class="group" id="ind">
+    <div class="group-head">
+      <span class="idx">01</span>
+      <h2>지표업데이트</h2>
+      <span class="group-note">구글시트 "지표업데이트" 표 전체 — 환율부터 리서치 링크까지</span>
+    </div>
+
+    <div class="summary-row">
+      <span class="summary-label">이 섹션 상태</span>
+      <span class="status-count"><span class="dot good"></span>안정 <b>3</b></span>
+      <span class="status-count"><span class="dot warn"></span>주의 <b>1</b></span>
+      <span class="status-count"><span class="dot critical"></span>경고 <b>0</b></span>
+      <span class="status-count"><span class="dot todo"></span>수치 확인 필요 <b>3</b></span>
+    </div>
+
+    <p class="subhead">환율 · 달러</p>
+    <div class="tile-grid">
+      <div class="tile">
+        <div class="tile-top">
+          <span class="tile-label">원/달러 환율</span>
+          <span class="pill info">정보</span>
+        </div>
+        <span class="value">1,387.3<span class="unit">KRW</span><span class="delta-chip up">▲ +5.6</span></span>
+        <span class="trend-line">데이터 축적 중 · 2/30일</span>
+        <span class="note">최근 한 달간 원화 강세 흐름 지속. 전일 대비로는 소폭 반락(원화 약세).</span>
+        <span class="meta"><span>기준일 2026-08-22</span><a href="https://search.naver.com/search.naver?where=nexearch&query=환율" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+      <div class="tile">
+        <div class="tile-top">
+          <span class="tile-label">달러 인덱스 (DXY)<span class="code">유동성지표</span></span>
+          <span class="pill info">정보 · 약세</span>
+        </div>
+        <span class="value">98.84<span class="unit">pt</span><span class="delta-chip down">▼ -0.06%</span></span>
+        <span class="trend-line">데이터 축적 중 · 2/30일</span>
+        <span class="note">105↑ 강세 / 100↓ 약세 기준. 현재 약세 구간 → 위험자산에 우호적.</span>
+        <span class="meta"><span>기준일 2026-08-22</span><a href="https://kr.investing.com/indices/usdollar" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+    </div>
+
+    <p class="subhead">금리</p>
+    <div class="tile-grid">
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">美 10년물 국채금리</span><span class="pill info">정보</span></div>
+        <span class="value">4.74<span class="unit">%</span><span class="delta-chip up">▲ +0.03%p</span></span>
+        <span class="trend-line">데이터 축적 중 · 2/30일</span>
+        <span class="note">장기채 금리. 하락 시 장기채 가격 상승.</span>
+        <span class="meta"><span>기준일 2026-08-21</span><a href="https://kr.investing.com/rates-bonds/u.s.-10-year-bond-yield" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">美 2년물 국채금리<span class="code">유동성지표</span></span><span class="pill info">정보</span></div>
+        <span class="value">4.19<span class="unit">%</span><span class="delta-chip up">▲ +0.38%p</span></span>
+        <span class="trend-line">데이터 축적 중 · 2/30일</span>
+        <span class="note">연준 선행지표. 상승 시 긴축 장기화 시사, 하락 시 유동성 완화 시사.</span>
+        <span class="meta"><span>기준일 2026-08-20</span><a href="https://fred.stlouisfed.org/series/DGS2" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">10Y–2Y 금리차</span><span class="pill good">안정</span></div>
+        <span class="value">+0.55<span class="unit">%p</span><span class="delta-chip down">▼ -0.36%p</span></span>
+        <span class="trend-line">데이터 축적 중 · 2/30일</span>
+        <span class="note">음전환 후 12~18개월 내 침체 신호로 해석. 현재 정상(양수) 구간이나 스프레드 축소 중.</span>
+        <span class="meta"><span>산출 2026-08-21</span><a href="https://indexergo.com/series/?detailId=13402&frq=D" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">연준 기준금리</span><span class="pill info">정보</span></div>
+        <span class="value">3.50–3.75<span class="unit">%</span><span class="delta-chip flat">동결</span></span>
+        <span class="note">2026-07-29 FOMC, 목표 레인지 동결 유지.</span>
+        <span class="meta"><span>기준일 2026-07-29</span><a href="https://indexergo.com/series/?detailId=14601&frq=D" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">SOFR 금리</span><span class="pill info">정보</span></div>
+        <span class="value">3.63<span class="unit">%</span><span class="delta-chip up">▲ +0.01%p</span></span>
+        <span class="trend-line">데이터 축적 중 · 2/30일</span>
+        <span class="note">익일물 담보 조달금리. 기준금리 레인지 내 정상 범위.</span>
+        <span class="meta"><span>기준일 2026-08-20</span><a href="https://www.sofrrate.com/" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">실질금리 (10Y TIPS)</span><span class="pill info">정보</span></div>
+        <span class="value">2.38<span class="unit">%</span><span class="delta-chip up">▲ +0.39%p</span></span>
+        <span class="trend-line">데이터 축적 중 · 2/30일</span>
+        <span class="note">명목금리 − 기대인플레이션. 4월 이후 갱신 확인, 최신치로 교체.</span>
+        <span class="meta"><span>기준일 2026-08-19</span><a href="https://fred.stlouisfed.org/series/DFII10" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+    </div>
+
+    <p class="subhead">유동성</p>
+    <div class="tile-grid">
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">Fed 대차대조표 총자산</span><span class="pill info">정보</span></div>
+        <span class="value">6.75<span class="unit">조$</span><span class="delta-chip down">▼ -0.01조$</span></span>
+        <span class="note">QT로 고점(8.97조$) 대비 -25%. 축소 지속 중.</span>
+        <span class="meta"><span>H.4.1 2026-08-19</span><a href="https://www.federalreserve.gov/monetarypolicy/bst_recenttrends.htm" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">M2 통화량</span><span class="pill info">정보</span></div>
+        <span class="value">23.16<span class="unit">조$</span><span class="delta-chip flat">― 변동없음</span></span>
+        <span class="note">전년 대비 +5.5%, 10년 평균 상회하는 증가세.</span>
+        <span class="meta"><span>기준월 2026-06</span><a href="https://fred.stlouisfed.org/series/M2SL" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">RRP 잔액 (역레포)</span><span class="pill warn">주의</span></div>
+        <span class="value">0.2<span class="unit">억$</span><span class="delta-chip flat">― 변동없음</span></span>
+        <span class="trend-line">데이터 축적 중 · 2/30일</span>
+        <span class="note">사실상 고갈 수준. MMF 완충 여력 소진 → 추가 QT 시 지준 압박 가능성 주시.</span>
+        <span class="meta"><span>기준일 2026-08-21</span><a href="https://www.newyorkfed.org/markets/desk-operations/reverse-repo" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">RRP 금리</span><span class="pill todo">확인 필요</span></div>
+        <a class="goto-btn" href="https://indexergo.com/series/?detailId=14603&frq=D" target="_blank" rel="noopener">사이트에서 바로 확인하기</a>
+        <span class="note">은행간 지준 익일 대여 적용금리. 클릭하면 출처 사이트로 이동합니다.</span>
+        <span class="meta"><span>실시간 갱신 예정</span></span>
+      </div>
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">지급준비금</span><span class="pill todo">확인 필요</span></div>
+        <a class="goto-btn" href="https://indexergo.com/series/?detailId=14103&frq=D" target="_blank" rel="noopener">사이트에서 바로 확인하기</a>
+        <span class="note">은행권 지준 총량. 급감 시 단기자금시장 경색 위험. 클릭하면 출처 사이트로 이동합니다.</span>
+        <span class="meta"><span>실시간 갱신 예정</span></span>
+      </div>
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">TGA 잔고</span><span class="pill info">정보</span></div>
+        <span class="value">961.95<span class="unit">억$</span><span class="delta-chip flat">― 변동없음</span></span>
+        <span class="trend-line">데이터 축적 중 · 2/30일</span>
+        <span class="note">최신 확인분 기준 유지. TGA 증가는 시중 유동성 흡수 요인.</span>
+        <span class="meta"><span>기준일 2026-08-18</span><a href="https://en.macromicro.me/collections/9/us-market-relative/34339/us-treasury-general-account" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+    </div>
+
+    <p class="subhead">리스크 · 신용</p>
+    <div class="tile-grid">
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">VIX (변동성지수)</span><span class="pill good">안정</span></div>
+        <span class="value">15.13<span class="unit">pt</span><span class="delta-chip down">▼ -0.88</span></span>
+        <span class="trend-line">데이터 축적 중 · 2/30일</span>
+        <span class="note">20~30 불안, 30↑ 패닉 기준. 52주 밴드 하단권, 2026년 저점권 근접.</span>
+        <span class="meta"><span>기준일 2026-08-21</span><a href="https://www.investing.com/indices/volatility-s-p-500" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">美 CDS 프리미엄</span><span class="pill todo">확인 필요</span></div>
+        <a class="goto-btn" href="https://en.macromicro.me/charts/68239/us-5year-cds" target="_blank" rel="noopener">사이트에서 바로 확인하기</a>
+        <span class="note">낮음 → 신용 안정, 높음 → 부도 위험 인식 증가. 클릭하면 출처 사이트로 이동합니다.</span>
+        <span class="meta"><span>실시간 갱신 예정</span></span>
+      </div>
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">하이일드 스프레드</span><span class="pill good">안정</span></div>
+        <span class="value">275<span class="unit">bp</span><span class="delta-chip flat">― 변동없음</span></span>
+        <span class="trend-line">데이터 축적 중 · 2/30일</span>
+        <span class="note">정크본드 vs 국채 가산금리. 800bp↑는 침체 동반 이력, 현재 낮은 구간.</span>
+        <span class="meta"><span>기준일 2026-08-18</span><a href="https://fred.stlouisfed.org/series/BAMLH0A0HYM2EY" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+    </div>
+
+    <p class="subhead">원자재</p>
+    <div class="tile-grid">
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">WTI 유가</span><span class="pill info">정보</span></div>
+        <span class="value">86.64<span class="unit">$/bbl</span><span class="delta-chip down">▼ -0.19$</span></span>
+        <span class="trend-line">데이터 축적 중 · 2/30일</span>
+        <span class="note">유가↑ → 인플레 압력↑ → 금리 상방 압력, 주식시장엔 부담.</span>
+        <span class="meta"><span>기준일 2026-08-22</span><a href="https://oilprice.com/futures/wti/" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+    </div>
+
+    <p class="subhead">정책 기대</p>
+    <div class="tile-grid">
+      <div class="tile">
+        <div class="tile-top"><span class="tile-label">CME FedWatch<span class="code">9/16 FOMC</span></span><span class="pill info">정보</span></div>
+        <span class="value">68.4<span class="unit">% 동결</span><span class="delta-chip flat">― 변동없음</span></span>
+        <span class="note">금리 인하 확률은 약 31.6%로 반영 중.</span>
+        <span class="meta"><span>기준일 2026-08-20</span><a href="https://www.cmegroup.com/ko/markets/interest-rates/cme-fedwatch-tool.html" target="_blank" rel="noopener">source ↗</a></span>
+      </div>
+    </div>
+
+    <p class="subhead">리서치 바로가기</p>
+    <div class="link-grid">
+      <a class="link-chip" href="https://www.etfcheck.co.kr/mobile/main" target="_blank" rel="noopener"><b>ETF 자금흐름</b>etfcheck.co.kr ↗</a>
+      <a class="link-chip" href="https://www.sec.gov/search-filings" target="_blank" rel="noopener"><b>13F</b>sec.gov ↗</a>
+      <a class="link-chip" href="https://whalewisdom.com/" target="_blank" rel="noopener"><b>13F</b>whalewisdom.com ↗</a>
+      <a class="link-chip" href="https://www.insiderdashboard.com/?tab=ceo-buys" target="_blank" rel="noopener"><b>내부자거래</b>insiderdashboard ↗</a>
+    </div>
+  </section>
+
+  <!-- 02 금리 체크리스트 -->
+  <section class="group" id="rate-check">
+    <div class="group-head">
+      <span class="idx">02</span>
+      <h2>금리 체크리스트</h2>
+      <span class="group-note">구글시트 "금리 체크리스트" — 통화정책 방향을 판단하는 5개 핵심 항목</span>
+    </div>
+    <div class="check-list">
+      <div class="check-row good">
+        <div class="check-left">
+          <span class="check-label">연준 기준금리</span>
+          <span class="check-crit">기준: 추세 확인 — 동결/인상/인하 방향성</span>
+        </div>
+        <div class="check-right"><span class="check-value">3.50–3.75%</span><span class="delta-chip flat">동결</span><span class="pill info">정보</span></div>
+      </div>
+      <div class="check-row good">
+        <div class="check-left">
+          <span class="check-label">10년물 국채금리</span>
+          <span class="check-crit">기준: 금리역전 여부 — 정상은 10Y &gt; 2Y</span>
+        </div>
+        <div class="check-right"><span class="check-value">4.74%</span><span class="delta-chip up">▲ +0.03%p</span><span class="pill good">정상</span></div>
+      </div>
+      <div class="check-row good">
+        <div class="check-left">
+          <span class="check-label">美10Y–美2Y 금리차</span>
+          <span class="check-crit">기준: 음수 전환 후 12~18개월 내 침체 사전 신호</span>
+        </div>
+        <div class="check-right"><span class="check-value">+0.55%p</span><span class="delta-chip down">▼ -0.36%p</span><span class="pill good">안정</span></div>
+      </div>
+      <div class="check-row good">
+        <div class="check-left">
+          <span class="check-label">CME FedWatch 확률</span>
+          <span class="check-crit">기준: 다음 FOMC 인하 확률</span>
+        </div>
+        <div class="check-right"><span class="check-value">동결 68.4%</span><span class="delta-chip flat">― 변동없음</span><span class="pill info">정보</span></div>
+      </div>
+      <div class="check-row good">
+        <div class="check-left">
+          <span class="check-label">실질금리 (10Y TIPS)</span>
+          <span class="check-crit">기준: 명목금리 − 인플레이션</span>
+        </div>
+        <div class="check-right"><span class="check-value">2.38%</span><span class="delta-chip up">▲ +0.39%p</span><span class="pill info">정보</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 03 고용관련지표 -->
+  <section class="group" id="employment">
+    <div class="group-head">
+      <span class="idx">03</span>
+      <h2>고용관련지표</h2>
+      <span class="group-note">구글시트 "고용관련지표" — 연준 듀얼 매데이트의 한 축, 침체 선행 신호</span>
+    </div>
+    <div class="check-list">
+      <div class="check-row critical">
+        <div class="check-left">
+          <span class="check-label">비농업고용 (NFP)</span>
+          <span class="check-crit">2026년 7월분 · 시장 예상 +80천명을 큰 폭 하회, 마이너스 전환</span>
+        </div>
+        <div class="check-right"><span class="check-value">-23천명</span><span class="delta-chip down">▼ -80천명</span><span class="pill critical">경고</span></div>
+      </div>
+      <div class="check-row good">
+        <div class="check-left">
+          <span class="check-label">신규 실업수당 청구건수</span>
+          <span class="check-crit">평시 20~25만 / 30만↑ 둔화 / 40만↑ 침체</span>
+        </div>
+        <div class="check-right"><span class="check-value">206천건</span><span class="delta-chip flat">― 변동없음</span><span class="pill good">안정</span></div>
+      </div>
+      <div class="check-row good">
+        <div class="check-left">
+          <span class="check-label">Sahm Rule</span>
+          <span class="check-crit">0.50%p 도달 시 침체 신호(1970년 이후 全적중)</span>
+        </div>
+        <div class="check-right"><span class="check-value">-0.03%p</span><span class="delta-chip flat">― 변동없음</span><span class="pill good">안정</span></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    수치는 각 출처 사이트에서 자동 수집한 참고용 정보이며, 지표별 기준 시각이 서로 다를 수 있습니다. 투자 판단과 책임은 본인에게 있습니다. 구글시트 원본의 "지표업데이트·금리 체크리스트·고용관련지표" 분류와 판단 기준을 그대로 따랐습니다.
+  </footer>
+
+</div>
+</body>
+</html>
