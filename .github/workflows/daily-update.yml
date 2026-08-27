@@ -1,4 +1,3 @@
-# retest after refreshing CLAUDE_CODE_OAUTH_TOKEN
 name: Daily Macro Dashboard Update
 
 on:
@@ -17,7 +16,7 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,14 +33,25 @@ jobs:
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Run Claude to update dashboard data
+        id: claude_run
+        continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           claude -p "$(cat .github/workflows/prompt.txt)" \
             --allowedTools "Bash,Read,Write,Edit,WebSearch,WebFetch" \
+            --max-turns 60 \
             --output-format text
 
+      - name: Report claude step outcome
+        if: always()
+        run: echo "claude step outcome was ${{ steps.claude_run.outcome }}"
+
+      # Runs even if the Claude step above failed/timed out partway through —
+      # whatever index.html / data-log.json changes it DID manage to write to
+      # disk before failing still get committed, so a partial run is never lost.
       - name: Commit and push if changed
+        if: always()
         run: |
           git config user.name "Joosung-1019"
           git config user.email "jugul1019@gmail.com"
@@ -54,3 +64,7 @@ jobs:
             git push
             echo "GIT RESULT: SUCCESS"
           fi
+
+      - name: Fail the run if claude step failed (for visibility)
+        if: steps.claude_run.outcome == 'failure'
+        run: exit 1
