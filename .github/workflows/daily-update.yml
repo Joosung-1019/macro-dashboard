@@ -1,0 +1,55 @@
+name: Daily Macro Dashboard Update
+
+on:
+  schedule:
+    - cron: '0 0 * * *'   # 09:00 KST (UTC+9) daily
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/daily-update.yml'
+      - '.github/workflows/prompt.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+          fetch-depth: 1
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run Claude to update dashboard data
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          claude -p "$(cat .github/workflows/prompt.txt)" \
+            --allowedTools "Bash,Read,Write,Edit,WebSearch,WebFetch" \
+            --output-format text
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "Joosung-1019"
+          git config user.email "jugul1019@gmail.com"
+          git add index.html data-log.json
+          if git diff --cached --quiet; then
+            echo "GIT RESULT: NOCHANGE"
+          else
+            KST_NOW=$(date -u -d '+9 hours' '+%Y-%m-%d %H:%M')
+            git commit -m "자동 갱신(GitHub Actions): ${KST_NOW}"
+            git push
+            echo "GIT RESULT: SUCCESS"
+          fi

@@ -1,0 +1,47 @@
+너는 매일 GitHub Actions에서 자동 실행되는 완전 독립형 자동화 스크립트다. 현재 작업 디렉터리는 이미 git 저장소(macro-dashboard)의 루트이며, 여기 있는 index.html(공개 대시보드)과 data-log.json(전일대비/30일평균 계산용 데이터 로그)만 사용해서 완결적으로 처리한다.
+
+## 작업 순서
+1. Read로 현재 디렉터리의 index.html을 읽는다 (이미 존재하며, 이게 기존 디자인 템플릿이다). data-log.json도 Read로 읽는다.
+2. 아래 지표별 검색어/출처/상태기준대로 WebSearch(필요시 WebFetch)로 19개 지표 값을 조사한다.
+3. 아래 전일 대비 delta-chip 로직과 30일 평균 trend-line 로직에 따라 data-log.json을 갱신하고, index.html의 각 값/pill/delta-chip/trend-line/header-meta 타임스탬프를 Edit로 갱신한다. index.html의 CSS/레이아웃/클래스명/섹션 구조는 절대 변경하지 않는다 — 오직 값/상태/날짜만 바꾼다.
+4. Bash로 `date -u -d '+9 hours' '+%Y-%m-%d %H:%M'` 를 실행해서 정확한 KST(한국시간) 현재 시각을 구한다 (이 방법은 타임존 데이터베이스 없이도 항상 정확하다 — UTC에 9시간을 더하는 순수 계산이므로). 그 값으로 index.html의 updated-chip을 "마지막 갱신 <b>YYYY-MM-DD HH:MM</b> (KST)"로 갱신한다 (sched 배지는 건드리지 않음).
+5. data-log.json을 Write로 저장한다 (각 키의 배열, 최근 30일치만 유지).
+6. git add나 git commit, git push는 절대 실행하지 않는다. 이건 이 스크립트를 호출한 GitHub Actions 워크플로가 별도로 담당한다. 너는 index.html과 data-log.json 파일을 디스크에 정확히 써두는 것까지만 하면 된다.
+7. 마지막 답변 맨 앞줄에 반드시 RESULT: DONE 이라는 문구로 시작한다. 그 다음 줄부터 오늘 갱신한 내용을 짧게 요약한다.
+
+## 전일 대비 delta-chip 로직 (19개 지표 대상)
+data-log.json의 19개 키: usdkrw, dxy, us10y, us2y, spread, fedfunds, sofr, realyield, fedassets, m2, rrp, tga, vix, hyspread, wti, fedwatch, nfp, jobless, sahm.
+이 로직은 index.html의 hero-grid 4개 타일, 01의 해당 16개 tile value, 02의 5개 check-right, 03의 3개 check-right 모두에 적용한다. RRP금리, 지급준비금, CDS 3개는 값이 없어 이전 링크형 버튼을 유지하고 delta-chip 대상이 아니다.
+
+delta 값 우선순위: 1순위는 검색 결과 자체가 전일 대비 변동을 알려주면 그 값을 바로 쓰는 것이다(로그에 어제 기록이 없어도 됨). 2순위는 출처가 안 주면 data-log.json의 이전 기록과 비교하는 것이다. 3순위 최후 수단은 둘 다 없으면 delta-chip first 클래스로 최초 기록이라고 표시하는 것이다.
+색상 규칙: delta가 양수(상승)면 delta-chip up 클래스를 쓰고 위쪽 화살표와 플러스 부호로 표시한다(빨강, 한국 증시 관례). delta가 음수(하락)면 delta-chip down 클래스를 쓰고 아래쪽 화살표와 마이너스 부호로 표시한다(파랑). delta가 0이면 delta-chip flat 클래스를 쓰고 물결선과 변동없음 텍스트로 표시한다.
+연준기준금리 예외: 미드포인트가 변하지 않았으면 delta-chip flat 클래스에 동결 텍스트, 0.25퍼센트포인트 인상 또는 인하 시 각각 up 또는 down 클래스에 인상 또는 인하 텍스트를 쓴다.
+
+## 30일 평균 trend-line 로직 (usdkrw, dxy, us10y, us2y, spread, sofr, realyield, rrp, tga, vix, hyspread, wti 이 12개 지표만 해당)
+data-log.json 해당 키 배열 개수(오늘 포함)가 5 미만이면 trend-line을 데이터 축적 중이라는 문구와 현재 일수를 30일 중 몇일째인지로 표시한다. 5 이상이면 최근 최대 30개의 평균과 표본표준편차를 구해 30일 평균 대비 퍼센트로 표시하고, z스코어의 절댓값이 1.5 이상일 때만(또는 표준편차가 0에 가까우면 퍼센트 절댓값이 5 이상일 때만) trend-flag up 또는 down 클래스로 평균 이탈 배지를 추가로 붙인다. 배열에 오늘 값 추가 후 30개 초과시 가장 오래된 것부터 삭제한다.
+
+## 지표별 검색어, 출처, 상태기준
+1. 원달러환율(usdkrw). 검색어: USD KRW exchange rate today. 출처: https://search.naver.com/search.naver?where=nexearch&query=환율 . 항상 info 상태.
+2. 달러인덱스(dxy). 검색어: US Dollar Index DXY price today. 출처: https://kr.investing.com/indices/usdollar . 105 이상이면 강세, 100 미만이면 약세, 그 사이는 혼조, 클래스는 info.
+3. 미국10년물국채금리(us10y). 검색어: US 10 year treasury yield today. 출처: https://kr.investing.com/rates-bonds/u.s.-10-year-bond-yield . info.
+4. 미국2년물국채금리(us2y). 검색어: US 2 year treasury yield today. 출처: https://fred.stlouisfed.org/series/DGS2 . info.
+5. 10Y-2Y금리차(spread, 직접계산). 양수면 good, 음수면 critical이고 note에 역전이며 12에서 18개월 내 침체 신호라고 적는다. 출처: https://indexergo.com/series/?detailId=13402&frq=D
+6. 연준기준금리(fedfunds). 검색어: federal funds rate target range current FOMC. 출처: https://indexergo.com/series/?detailId=14601&frq=D . info.
+7. SOFR금리(sofr). 검색어: SOFR rate today. 출처: https://www.sofrrate.com/ . info.
+8. 실질금리(realyield, DFII10). 검색어: 10 year TIPS real yield DFII10 today. 출처: https://fred.stlouisfed.org/series/DFII10 . 데이터가 오래되면 todo 상태로 값은 유지.
+9. Fed총자산(fedassets). 검색어: Federal Reserve total assets balance sheet WALCL latest. 출처: https://www.federalreserve.gov/monetarypolicy/bst_recenttrends.htm . info, 조 달러 단위.
+10. M2(m2). 검색어: M2SL money supply latest value billions FRED. 출처: https://fred.stlouisfed.org/series/M2SL . info, 조 달러 단위.
+11. RRP잔액(rrp). 검색어: RRPONTSYD reverse repo billions today. 출처: https://www.newyorkfed.org/markets/desk-operations/reverse-repo . 500억 달러 미만이면 warn(고갈수준), 그 이상이면 info.
+12. RRP금리. 출처: https://indexergo.com/series/?detailId=14603&frq=D . 값이 없으면 이전 링크형 버튼 유지.
+13. 지급준비금. 출처: https://indexergo.com/series/?detailId=14103&frq=D . 값이 없으면 이전 링크형 버튼 유지.
+14. TGA잔고(tga). 검색어: Treasury General Account TGA balance latest. 출처: https://en.macromicro.me/collections/9/us-market-relative/34339/us-treasury-general-account . info, 억 달러 단위.
+15. VIX(vix). 검색어: VIX index level today. 출처: https://www.investing.com/indices/volatility-s-p-500 . 20 미만이면 good, 20에서 30이면 warn, 30 이상이면 critical.
+16. CDS. 출처: https://en.macromicro.me/charts/68239/us-5year-cds . 값이 없으면 이전 링크형 버튼 유지.
+17. 하이일드스프레드(hyspread). 검색어: ICE BofA US High Yield OAS latest BAMLH0A0HYM2EY. 출처: https://fred.stlouisfed.org/series/BAMLH0A0HYM2EY . 400bp 미만이면 good, 400에서 700이면 warn, 700 이상이면 critical.
+18. WTI유가(wti). 검색어: WTI crude oil price today. 출처: https://oilprice.com/futures/wti/ . info.
+19. CME FedWatch(fedwatch). 검색어: CME FedWatch tool rate cut probability next FOMC meeting. 출처: https://www.cmegroup.com/ko/markets/interest-rates/cme-fedwatch-tool.html . info, 동결 확률과 인하 확률 둘 다 note에 적는다.
+
+값을 못 찾은 타일은 이전 값을 유지한다. 절대 추측하지 않는다. 갱신 후 01 섹션 summary-row 카운트를 실제 상태 개수에 맞게 다시 세고, hero-grid 4개 타일도 본문과 동기화한다.
+
+02 금리 체크리스트 섹션은 01과 값 및 delta를 동기화한다: 연준기준금리, 10년물국채금리(10Y가 2Y보다 크면 정상 good), 10Y-2Y금리차, CME FedWatch확률, 실질금리.
+03 고용관련지표 섹션: 비농업고용(nfp). 검색어: latest nonfarm payrolls report actual vs expected. 예상치 대비 30퍼센트 이상 하회하거나 마이너스면 warn 또는 critical. 신규실업수당청구건수(jobless). 검색어: initial jobless claims this week actual. 25만 이하면 good, 25만에서 30만이면 warn, 30만에서 40만이면 critical, 40만 초과면 critical. Sahm Rule(sahm). 검색어: Sahm rule recession indicator current value. 0.3 미만이면 good, 0.3에서 0.5면 warn, 0.5 이상이면 critical.
