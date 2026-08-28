@@ -28,7 +28,6 @@ jobs:
       - name: Ensure we are on a real local branch (not detached HEAD)
         run: |
           git checkout -B main origin/main
-          git status
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -44,28 +43,33 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
+          set +e
           claude -p "$(cat .github/workflows/prompt.txt)" \
             --allowedTools "Bash,Read,Write,Edit,WebSearch,WebFetch" \
             --max-turns 60 \
-            --output-format text
+            --output-format text > /tmp/claude_stdout.log 2>/tmp/claude_stderr.log
+          echo "CLAUDE_EXIT_CODE=$?" >> claude-debug.log
+          echo "--- STDOUT (last 200 lines) ---" >> claude-debug.log
+          tail -n 200 /tmp/claude_stdout.log >> claude-debug.log
+          echo "--- STDERR (last 100 lines) ---" >> claude-debug.log
+          tail -n 100 /tmp/claude_stderr.log >> claude-debug.log
+          exit_code=$(grep -o 'CLAUDE_EXIT_CODE=[0-9]*' claude-debug.log | head -1 | cut -d= -f2)
+          if [ "$exit_code" != "0" ]; then exit 1; fi
 
       - name: Report claude step outcome
         if: always()
         run: echo "claude step outcome was ${{ steps.claude_run.outcome }}"
 
-      # Runs even if the Claude step above failed/timed out partway through —
-      # whatever index.html / data-log.json changes it DID manage to write to
-      # disk before failing still get committed, so a partial run is never lost.
-      - name: Commit and push if changed
+      - name: Commit and push if changed (always, including debug log)
         if: always()
         run: |
           set -x
           git config user.name "Joosung-1019"
           git config user.email "jugul1019@gmail.com"
-          git branch -vv
           git fetch origin main
           git rebase origin/main || (git rebase --abort; echo "REBASE FAILED, continuing on local base"; true)
           git add index.html data-log.json
+          [ -f claude-debug.log ] && git add -f claude-debug.log
           if git diff --cached --quiet; then
             echo "GIT RESULT: NOCHANGE"
           else
