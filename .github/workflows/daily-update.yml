@@ -4,11 +4,6 @@ on:
   schedule:
     - cron: '0 0 * * *'   # 09:00 KST (UTC+9) daily
   workflow_dispatch: {}
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/daily-update.yml'
-      - '.github/workflows/prompt.txt'
 
 permissions:
   contents: write
@@ -26,8 +21,7 @@ jobs:
           fetch-depth: 1
 
       - name: Ensure we are on a real local branch (not detached HEAD)
-        run: |
-          git checkout -B main origin/main
+        run: git checkout -B main origin/main
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -43,77 +37,31 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          set +e
           claude -p "$(cat .github/workflows/prompt.txt)" \
             --allowedTools "Bash,Read,Write,Edit,WebSearch,WebFetch" \
             --max-turns 60 \
-            --output-format text > /tmp/claude_stdout.log 2>/tmp/claude_stderr.log
-          code=$?
-          {
-            echo "CLAUDE_EXIT_CODE=$code"
-            echo "--- STDOUT (last 200 lines) ---"
-            tail -n 200 /tmp/claude_stdout.log
-            echo "--- STDERR (last 100 lines) ---"
-            tail -n 100 /tmp/claude_stderr.log
-          } > claude-debug.log
-          exit "$code"
+            --output-format text
 
-      - name: Report claude step outcome
-        if: always()
-        run: echo "claude step outcome was ${{ steps.claude_run.outcome }}"
-
-      - name: Commit and push if changed (always, including debug log)
+      # Runs even if the Claude step above failed partway through — whatever
+      # index.html / data-log.json changes it DID manage to write to disk
+      # before failing still get committed, so a partial run is never lost.
+      - name: Commit and push if changed
         if: always()
         run: |
           set +e
-          {
-            echo "=== commit-step debug ==="
-            date -u
-            echo "pwd: $(pwd)"
-            echo "workspace listing:"
-            ls -la
-            git config user.name "Joosung-1019"
-            git config user.email "jugul1019@gmail.com"
-            echo "-- fetch --"
-            git fetch origin main 2>&1
-            echo "fetch_exit=$?"
-            echo "-- rebase --"
-            git rebase origin/main 2>&1
-            rebase_exit=$?
-            echo "rebase_exit=$rebase_exit"
-            if [ "$rebase_exit" != "0" ]; then
-              git rebase --abort 2>&1
-              echo "rebase aborted, continuing on local base"
-            fi
-            echo "-- add --"
-            git add index.html data-log.json 2>&1
-            if [ -f claude-debug.log ]; then
-              git add -f claude-debug.log 2>&1
-              echo "added claude-debug.log"
-            else
-              echo "claude-debug.log NOT FOUND in workspace"
-            fi
-            echo "-- diff --cached status --"
-            git diff --cached --quiet
-            diff_status=$?
-            echo "diff_status=$diff_status (0=nochange,1=haschanges)"
-            if [ "$diff_status" = "0" ]; then
-              echo "GIT RESULT: NOCHANGE"
-            else
-              KST_NOW=$(date -u -d '+9 hours' '+%Y-%m-%d %H:%M')
-              git commit -m "자동 갱신(GitHub Actions): ${KST_NOW}" 2>&1
-              echo "commit_exit=$?"
-              git push origin HEAD:main 2>&1
-              echo "push_exit=$?"
-              echo "GIT RESULT: SUCCESS"
-            fi
-          } > commit-step-debug.log 2>&1
-          cat commit-step-debug.log
-          # commit this debug log itself on a second pass, best-effort, ignoring failures
-          git add -f commit-step-debug.log 2>/dev/null
-          git commit -m "debug: commit-step-debug.log" 2>/dev/null
-          git push origin HEAD:main 2>/dev/null
-          exit 0
+          git config user.name "Joosung-1019"
+          git config user.email "jugul1019@gmail.com"
+          git fetch origin main
+          git rebase origin/main || { git rebase --abort; echo "rebase failed, continuing on local base"; }
+          git add index.html data-log.json
+          if git diff --cached --quiet; then
+            echo "GIT RESULT: NOCHANGE"
+          else
+            KST_NOW=$(date -u -d '+9 hours' '+%Y-%m-%d %H:%M')
+            git commit -m "자동 갱신(GitHub Actions): ${KST_NOW}"
+            git push origin HEAD:main
+            echo "GIT RESULT: SUCCESS"
+          fi
 
       - name: Fail the run if claude step failed (for visibility)
         if: steps.claude_run.outcome == 'failure'
