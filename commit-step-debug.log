@@ -1,0 +1,35 @@
+=== commit-step debug ===
+Fri Aug 28 05:54:09 UTC 2026
+pwd: /home/runner/work/macro-dashboard/macro-dashboard
+workspace listing:
+total 72
+drwxr-xr-x 4 runner runner  4096 Aug 28 05:54 .
+drwxr-xr-x 3 runner runner  4096 Aug 28 05:45 ..
+drwxr-xr-x 7 runner runner  4096 Aug 28 05:45 .git
+drwxr-xr-x 3 runner runner  4096 Aug 28 05:45 .github
+-rw-r--r-- 1 runner runner  1220 Aug 28 05:54 claude-debug.log
+-rw-r--r-- 1 runner runner   129 Aug 28 05:54 commit-step-debug.log
+-rw-r--r-- 1 runner runner 10522 Aug 28 05:52 data-log.json
+-rw-r--r-- 1 runner runner 35909 Aug 28 05:53 index.html
+-- fetch --
+From https://github.com/Joosung-1019/macro-dashboard
+ * branch            main       -> FETCH_HEAD
+fetch_exit=0
+-- rebase --
+error: cannot rebase: You have unstaged changes.
+error: Please commit or stash them.
+rebase_exit=1
+fatal: no rebase in progress
+rebase aborted, continuing on local base
+-- add --
+added claude-debug.log
+-- diff --cached status --
+diff_status=1 (0=nochange,1=haschanges)
+[main 9d0d52e] 자동 갱신(GitHub Actions): 2026-08-28 14:54
+ 3 files changed, 51 insertions(+), 38 deletions(-)
+ create mode 100644 claude-debug.log
+commit_exit=0
+To https://github.com/Joosung-1019/macro-dashboard
+   dc85c07..9d0d52e  HEAD -> main
+push_exit=0
+GIT RESULT: SUCCESS
