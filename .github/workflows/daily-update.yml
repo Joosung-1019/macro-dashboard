@@ -48,13 +48,15 @@ jobs:
             --allowedTools "Bash,Read,Write,Edit,WebSearch,WebFetch" \
             --max-turns 60 \
             --output-format text > /tmp/claude_stdout.log 2>/tmp/claude_stderr.log
-          echo "CLAUDE_EXIT_CODE=$?" >> claude-debug.log
-          echo "--- STDOUT (last 200 lines) ---" >> claude-debug.log
-          tail -n 200 /tmp/claude_stdout.log >> claude-debug.log
-          echo "--- STDERR (last 100 lines) ---" >> claude-debug.log
-          tail -n 100 /tmp/claude_stderr.log >> claude-debug.log
-          exit_code=$(grep -o 'CLAUDE_EXIT_CODE=[0-9]*' claude-debug.log | head -1 | cut -d= -f2)
-          if [ "$exit_code" != "0" ]; then exit 1; fi
+          code=$?
+          {
+            echo "CLAUDE_EXIT_CODE=$code"
+            echo "--- STDOUT (last 200 lines) ---"
+            tail -n 200 /tmp/claude_stdout.log
+            echo "--- STDERR (last 100 lines) ---"
+            tail -n 100 /tmp/claude_stderr.log
+          } > claude-debug.log
+          exit "$code"
 
       - name: Report claude step outcome
         if: always()
@@ -63,21 +65,55 @@ jobs:
       - name: Commit and push if changed (always, including debug log)
         if: always()
         run: |
-          set -x
-          git config user.name "Joosung-1019"
-          git config user.email "jugul1019@gmail.com"
-          git fetch origin main
-          git rebase origin/main || (git rebase --abort; echo "REBASE FAILED, continuing on local base"; true)
-          git add index.html data-log.json
-          [ -f claude-debug.log ] && git add -f claude-debug.log
-          if git diff --cached --quiet; then
-            echo "GIT RESULT: NOCHANGE"
-          else
-            KST_NOW=$(date -u -d '+9 hours' '+%Y-%m-%d %H:%M')
-            git commit -m "자동 갱신(GitHub Actions): ${KST_NOW}"
-            git push origin HEAD:main
-            echo "GIT RESULT: SUCCESS"
-          fi
+          set +e
+          {
+            echo "=== commit-step debug ==="
+            date -u
+            echo "pwd: $(pwd)"
+            echo "workspace listing:"
+            ls -la
+            git config user.name "Joosung-1019"
+            git config user.email "jugul1019@gmail.com"
+            echo "-- fetch --"
+            git fetch origin main 2>&1
+            echo "fetch_exit=$?"
+            echo "-- rebase --"
+            git rebase origin/main 2>&1
+            rebase_exit=$?
+            echo "rebase_exit=$rebase_exit"
+            if [ "$rebase_exit" != "0" ]; then
+              git rebase --abort 2>&1
+              echo "rebase aborted, continuing on local base"
+            fi
+            echo "-- add --"
+            git add index.html data-log.json 2>&1
+            if [ -f claude-debug.log ]; then
+              git add -f claude-debug.log 2>&1
+              echo "added claude-debug.log"
+            else
+              echo "claude-debug.log NOT FOUND in workspace"
+            fi
+            echo "-- diff --cached status --"
+            git diff --cached --quiet
+            diff_status=$?
+            echo "diff_status=$diff_status (0=nochange,1=haschanges)"
+            if [ "$diff_status" = "0" ]; then
+              echo "GIT RESULT: NOCHANGE"
+            else
+              KST_NOW=$(date -u -d '+9 hours' '+%Y-%m-%d %H:%M')
+              git commit -m "자동 갱신(GitHub Actions): ${KST_NOW}" 2>&1
+              echo "commit_exit=$?"
+              git push origin HEAD:main 2>&1
+              echo "push_exit=$?"
+              echo "GIT RESULT: SUCCESS"
+            fi
+          } > commit-step-debug.log 2>&1
+          cat commit-step-debug.log
+          # commit this debug log itself on a second pass, best-effort, ignoring failures
+          git add -f commit-step-debug.log 2>/dev/null
+          git commit -m "debug: commit-step-debug.log" 2>/dev/null
+          git push origin HEAD:main 2>/dev/null
+          exit 0
 
       - name: Fail the run if claude step failed (for visibility)
         if: steps.claude_run.outcome == 'failure'
