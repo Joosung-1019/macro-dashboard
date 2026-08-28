@@ -1,0 +1,13 @@
+CLAUDE_EXIT_CODE=0
+--- STDOUT (last 200 lines) ---
+All changes look correct. Everything checks out — JSON valid, header/hero-grid/01 section reflecting updated values.
+
+RESULT: DONE
+- 헤더 갱신 시각: 2026-08-28 14:52 (KST)
+- 값 변동: 원/달러 1,375.3(▼-6.1), DXY 99.20(▲+0.06), SOFR 3.64(기준일만 갱신), Fed총자산 6.73조$(▼-0.02), TGA 959.44억$(▼-7.41), VIX 14.55(▼-0.35, 평균이탈 배지 해제), WTI 81.79$(▼-1.74), FedWatch 동결확률 65.9%(▲+1.6, 인상확률 34.1%로 갱신)
+- 10Y-2Y 스프레드는 +0.44%p로 변동없음(연산일자만 갱신), 원/달러는 30일 평균 대비 -0.60%로 여전히 평균 하회 배지 유지
+- 미국10년/2년물, 실질금리, M2, RRP잔액, 하이일드스프레드, 연준기준금리, NFP/실업수당/Sahm은 더 최신 데이터를 찾지 못해 기존 값 유지
+- RRP금리·지급준비금·CDS 3개는 지침대로 링크형 버튼 그대로 유지
+- data-log.json의 8개 시계열(usdkrw, dxy, sofr, fed_balance_sheet, tga, vix, wti, fedwatch)에 오늘자 값을 갱신, 나머지는 값 유지한 채 날짜만 보존
+- git add/commit/push는 수행하지 않음 (워크플로 담당)
+--- STDERR (last 100 lines) ---
