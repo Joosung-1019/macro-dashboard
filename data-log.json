@@ -3,7 +3,7 @@
     "description": "매크로 지표 데스크 일일 자동 수집 로그 — 각 series.history는 오래된 순으로 정렬됨",
     "windowDays": 30,
     "createdAt": "2026-08-26 07:34",
-    "lastRun": "2026-08-29 06:52"
+    "lastRun": "2026-08-29 09:06"
   },
   "series": {
     "usdkrw": {
