@@ -1,8 +1,24 @@
 너는 매일 GitHub Actions에서 자동 실행되는 완전 독립형 자동화 스크립트다. 현재 작업 디렉터리는 이미 git 저장소(macro-dashboard)의 루트이며, 여기 있는 index.html(공개 대시보드)과 data-log.json(전일대비/30일평균 계산용 데이터 로그)만 사용해서 완결적으로 처리한다.
 
+## 절대 규칙: 비용 절감 (턴 수 × 컨텍스트 크기로 비용이 결정된다)
+- 19개 지표를 하나씩 순차 검색하지 말 것. **한 메시지 안에 WebSearch 도구 호출을 4~6개씩 묶어서 병렬로 실행**하고, 결과를 받은 뒤 다음 묶음을 실행한다. 순차 검색은 턴 수를 늘려 비용이 급증한다.
+- RRP잔액(rrp)과 실질금리(realyield)는 검색 스니펫에 최신값이 잘 안 나오므로, WebSearch 대신 아래 'FRED 직접 조회' 섹션의 CSV를 Bash로 바로 조회한다.
+- 30일 평균/표준편차 계산은 눈으로 하지 말고 Bash python3으로 처리해서 턴과 오류를 줄인다.
+- index.html 수정은 전체 재작성이 아니라 Edit로 필요한 부분만 치환한다.
+
+## FRED 직접 조회 (rrp, realyield 두 지표 전용)
+이 두 개만 아래 CSV 엔드포인트를 Bash로 직접 조회한다. 나머지 17개 지표는 기존대로 WebSearch를 쓴다.
+
+Bash로 한 번에 실행:
+for S in RRPONTSYD DFII10; do echo "=== $S ==="; curl -sS --max-time 20 "https://fred.stlouisfed.org/graph/fredgraph.csv?id=$S" | tail -6; done
+
+응답은 첫 줄이 헤더이고 이후 `날짜,값` 행이 이어지는 CSV다. 값이 `.`인 행은 결측이니 건너뛰고, 숫자가 든 가장 최근 행의 날짜와 값을 쓴다. RRPONTSYD는 rrp(단위: 십억달러), DFII10은 realyield(단위: %)에 해당한다.
+
+실패 시(curl 실패, CSV 아님, 숫자 못 찾음) 절대 추측하지 말고 해당 지표를 todo(goto-btn)로 두고 데이터 로그에도 기록하지 않는다. 실패해도 나머지 작업은 정상 진행한다.
+
 ## 작업 순서
 1. Read로 현재 디렉터리의 index.html을 읽는다 (이미 존재하며, 이게 기존 디자인 템플릿이다). data-log.json도 Read로 읽는다.
-2. 아래 지표별 검색어/출처/상태기준대로 WebSearch(필요시 WebFetch)로 19개 지표 값을 조사한다.
+2. 위 'FRED 직접 조회'로 rrp, realyield 두 값을 얻는다. 나머지 17개 지표는 아래 지표별 검색어/출처/상태기준대로 WebSearch(필요시 WebFetch)로 조사한다 — 반드시 4~6개씩 묶어 병렬로 실행한다.
 3. 아래 전일 대비 delta-chip 로직과 30일 평균 trend-line 로직에 따라 data-log.json을 갱신하고, index.html의 각 값/pill/delta-chip/trend-line/header-meta 타임스탬프를 Edit로 갱신한다. index.html의 CSS/레이아웃/클래스명/섹션 구조는 절대 변경하지 않는다 — 오직 값/상태/날짜만 바꾼다.
 4. Bash로 `date -u -d '+9 hours' '+%Y-%m-%d %H:%M'` 를 실행해서 정확한 KST(한국시간) 현재 시각을 구한다 (이 방법은 타임존 데이터베이스 없이도 항상 정확하다 — UTC에 9시간을 더하는 순수 계산이므로). 그 값으로 index.html의 updated-chip을 "마지막 갱신 <b>YYYY-MM-DD HH:MM</b> (KST)"로 갱신한다 (sched 배지는 건드리지 않음).
 5. data-log.json을 Write로 저장한다 (각 키의 배열, 최근 30일치만 유지).
@@ -28,10 +44,10 @@ data-log.json 해당 키 배열 개수(오늘 포함)가 5 미만이면 trend-li
 5. 10Y-2Y금리차(spread, 직접계산). 양수면 good, 음수면 critical이고 note에 역전이며 12에서 18개월 내 침체 신호라고 적는다. 출처: https://indexergo.com/series/?detailId=13402&frq=D
 6. 연준기준금리(fedfunds). 검색어: federal funds rate target range current FOMC. 출처: https://indexergo.com/series/?detailId=14601&frq=D . info.
 7. SOFR금리(sofr). 검색어: SOFR rate today. 출처: https://www.sofrrate.com/ . info.
-8. 실질금리(realyield, DFII10). 검색어: 10 year TIPS real yield DFII10 today. 출처: https://fred.stlouisfed.org/series/DFII10 . 데이터가 오래되면 todo 상태로 값은 유지.
+8. 실질금리(realyield, DFII10). 검색하지 말고 위 'FRED 직접 조회'의 CSV로 값을 얻는다. 표시 출처 링크는 https://fred.stlouisfed.org/series/DFII10 . 조회 실패시에만 todo(goto-btn, delta-chip도 생략).
 9. Fed총자산(fedassets). 검색어: Federal Reserve total assets balance sheet WALCL latest. 출처: https://www.federalreserve.gov/monetarypolicy/bst_recenttrends.htm . info, 조 달러 단위.
 10. M2(m2). 검색어: M2SL money supply latest value billions FRED. 출처: https://fred.stlouisfed.org/series/M2SL . info, 조 달러 단위.
-11. RRP잔액(rrp). 검색어: RRPONTSYD reverse repo billions today. 출처: https://www.newyorkfed.org/markets/desk-operations/reverse-repo . 500억 달러 미만이면 warn(고갈수준), 그 이상이면 info.
+11. RRP잔액(rrp). 검색하지 말고 위 'FRED 직접 조회'의 CSV로 값을 얻는다. 표시 출처 링크는 https://www.newyorkfed.org/markets/desk-operations/reverse-repo . 500억 달러 미만이면 warn(고갈수준), 그 이상이면 info. 조회 실패시 todo(goto-btn).
 12. RRP금리. 출처: https://indexergo.com/series/?detailId=14603&frq=D . 값이 없으면 이전 링크형 버튼 유지.
 13. 지급준비금. 출처: https://indexergo.com/series/?detailId=14103&frq=D . 값이 없으면 이전 링크형 버튼 유지.
 14. TGA잔고(tga). 검색어: Treasury General Account TGA balance latest. 출처: https://en.macromicro.me/collections/9/us-market-relative/34339/us-treasury-general-account . info, 억 달러 단위.
