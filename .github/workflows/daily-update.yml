@@ -2,7 +2,7 @@ name: Daily Macro Dashboard Update
 
 on:
   schedule:
-    - cron: '0 0 * * *'   # 09:00 KST (UTC+9) daily
+    - cron: '7 0 * * *'   # 09:07 KST (UTC+9) daily — off the hour to dodge GitHub's top-of-hour scheduling congestion
   workflow_dispatch: {}
 
 permissions:
