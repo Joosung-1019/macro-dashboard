@@ -2,7 +2,11 @@ name: Daily Macro Dashboard Update
 
 on:
   schedule:
-    - cron: '0 0 * * *'   # 09:00 KST (UTC+9) daily
+    # Two attempts a day. GitHub does not guarantee scheduled runs fire on time
+    # (delays of hours, and occasional skipped days, are normal), so the second
+    # slot is a safety net: it exits immediately when the first one succeeded.
+    - cron: '0 0 * * *'   # 09:00 KST (UTC+9) — primary
+    - cron: '0 3 * * *'   # 12:00 KST (UTC+9) — backup, skipped if today's data already landed
   workflow_dispatch: {}
 
 permissions:
@@ -23,16 +27,40 @@ jobs:
       - name: Ensure we are on a real local branch (not detached HEAD)
         run: git checkout -B main origin/main
 
+      # Decides whether this run has anything to do. data-log.json's meta.lastRun
+      # is a KST timestamp written by the update itself, so a same-day value means
+      # today's collection already completed and this run is a redundant backup.
+      # Fails open: a missing/unreadable/partial value leaves lastRun empty, which
+      # never matches today, so the run proceeds rather than silently skipping.
+      # workflow_dispatch always proceeds — a manual click means "run it now".
+      - name: Decide whether today's data is already collected
+        id: guard
+        run: |
+          TODAY_KST=$(date -u -d '+9 hours' '+%Y-%m-%d')
+          LAST_RUN=$(python3 -c "import json; print(json.load(open('data-log.json'))['meta'].get('lastRun',''))" 2>/dev/null || echo "")
+          echo "today (KST) = ${TODAY_KST}"
+          echo "data-log.json meta.lastRun = ${LAST_RUN:-<none>}"
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "${LAST_RUN:0:10}" = "$TODAY_KST" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::오늘(${TODAY_KST}) 데이터가 이미 수집되어 있어 이 실행은 건너뜁니다."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::오늘(${TODAY_KST}) 데이터가 아직 없습니다. 수집을 진행합니다."
+          fi
+
       - name: Set up Node
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install Claude Code CLI
+        if: steps.guard.outputs.skip != 'true'
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Run Claude to update dashboard data
         id: claude_run
+        if: steps.guard.outputs.skip != 'true'
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -46,7 +74,7 @@ jobs:
       # index.html / data-log.json changes it DID manage to write to disk
       # before failing still get committed, so a partial run is never lost.
       - name: Commit and push if changed
-        if: always()
+        if: always() && steps.guard.outputs.skip != 'true'
         run: |
           set +e
           git config user.name "Joosung-1019"
