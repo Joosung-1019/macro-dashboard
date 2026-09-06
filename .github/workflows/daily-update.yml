@@ -27,25 +27,31 @@ jobs:
       - name: Ensure we are on a real local branch (not detached HEAD)
         run: git checkout -B main origin/main
 
-      # Decides whether this run has anything to do. data-log.json's meta.lastRun
-      # is a KST timestamp written by the update itself, so a same-day value means
-      # today's collection already completed and this run is a redundant backup.
-      # Fails open: a missing/unreadable/partial value leaves lastRun empty, which
-      # never matches today, so the run proceeds rather than silently skipping.
+      # Decides whether this run has anything to do. The signal is .run-status,
+      # written by the workflow itself (not by Claude) at the end of every run as
+      # "<KST date> ok" or "<KST date> partial". Only "<today> ok" means the day is
+      # genuinely finished; a partial run must stay retryable, which is why
+      # data-log.json's meta.lastRun is NOT used for this decision — Claude can die
+      # after writing that field, and trusting it would let a half-finished day
+      # block its own backup run for the rest of the day.
+      # Fails open: a missing or unreadable marker never equals "<today> ok", so the
+      # run proceeds rather than silently skipping.
       # workflow_dispatch always proceeds — a manual click means "run it now".
-      - name: Decide whether today's data is already collected
+      - name: Decide whether today's collection already completed
         id: guard
         run: |
           TODAY_KST=$(date -u -d '+9 hours' '+%Y-%m-%d')
+          RUN_STATUS=$(cat .run-status 2>/dev/null || echo "")
           LAST_RUN=$(python3 -c "import json; print(json.load(open('data-log.json'))['meta'].get('lastRun',''))" 2>/dev/null || echo "")
-          echo "today (KST) = ${TODAY_KST}"
-          echo "data-log.json meta.lastRun = ${LAST_RUN:-<none>}"
-          if [ "${{ github.event_name }}" = "schedule" ] && [ "${LAST_RUN:0:10}" = "$TODAY_KST" ]; then
+          echo "today (KST)  = ${TODAY_KST}"
+          echo ".run-status  = ${RUN_STATUS:-<none>}"
+          echo "meta.lastRun = ${LAST_RUN:-<none>}   (참고용, 판단에는 쓰지 않음)"
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$RUN_STATUS" = "$TODAY_KST ok" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::오늘(${TODAY_KST}) 데이터가 이미 수집되어 있어 이 실행은 건너뜁니다."
+            echo "::notice::오늘(${TODAY_KST}) 수집이 이미 정상 완료되어 이 실행은 건너뜁니다."
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::오늘(${TODAY_KST}) 데이터가 아직 없습니다. 수집을 진행합니다."
+            echo "::notice::오늘(${TODAY_KST}) 수집이 아직 정상 완료되지 않았습니다. 수집을 진행합니다."
           fi
 
       - name: Set up Node
@@ -70,6 +76,17 @@ jobs:
             --max-turns 60 \
             --output-format text
 
+      # The guard's input for later runs today, written by the workflow rather than
+      # by Claude so that a run which died partway is recorded as partial and stays
+      # retryable by the backup schedule.
+      - name: Record whether the collection completed
+        if: always() && steps.guard.outputs.skip != 'true'
+        run: |
+          TODAY_KST=$(date -u -d '+9 hours' '+%Y-%m-%d')
+          if [ "${{ steps.claude_run.outcome }}" = "success" ]; then S=ok; else S=partial; fi
+          echo "${TODAY_KST} ${S}" > .run-status
+          echo "::notice::수집 결과 기록: ${TODAY_KST} ${S}"
+
       # Runs even if the Claude step above failed partway through — whatever
       # index.html / data-log.json changes it DID manage to write to disk
       # before failing still get committed, so a partial run is never lost.
@@ -81,12 +98,15 @@ jobs:
           git config user.email "jugul1019@gmail.com"
           git fetch origin main
           git rebase origin/main || { git rebase --abort; echo "rebase failed, continuing on local base"; }
-          git add index.html data-log.json
+          git add index.html data-log.json .run-status
           if git diff --cached --quiet; then
             echo "GIT RESULT: NOCHANGE"
           else
             KST_NOW=$(date -u -d '+9 hours' '+%Y-%m-%d %H:%M')
-            git commit -m "자동 갱신(GitHub Actions): ${KST_NOW}"
+            # Marks the commit so a half-finished day is visible in git log, not just in the run logs.
+            TAG=""
+            [ "${{ steps.claude_run.outcome }}" = "success" ] || TAG=" [부분갱신]"
+            git commit -m "자동 갱신(GitHub Actions): ${KST_NOW}${TAG}"
             git push origin HEAD:main
             echo "GIT RESULT: SUCCESS"
           fi
