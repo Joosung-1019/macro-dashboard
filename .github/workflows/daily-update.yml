@@ -112,6 +112,39 @@ jobs:
           echo "::error::Claude 실행이 2회 모두 실패했습니다. 이번 실행은 부분갱신으로 기록됩니다."
           exit 1
 
+      # Only on a failed collection, and only to answer one question the run logs
+      # would answer if they were reachable: did the CLI fail because the account
+      # cannot talk to the API at all, or because the collection itself broke?
+      # A one-turn probe separates the two, and the verdict is committed to the
+      # repo because the log archive sits behind a host that some networks deny —
+      # .diag/last-failure.txt is readable over raw.githubusercontent.com.
+      - name: Diagnose a failed collection
+        if: always() && steps.guard.outputs.skip != 'true' && steps.claude_run.outcome == 'failure'
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set +e
+          OUT=$(timeout 3m claude -p "Reply with exactly: PONG" --max-turns 1 --output-format text 2>&1)
+          CODE=$?
+          # Actions masks secrets in the run log but NOT in files the job writes,
+          # so strip the token explicitly before this text is committed.
+          OUT=$(printf '%s' "$OUT" | sed "s|${CLAUDE_CODE_OAUTH_TOKEN}|<redacted>|g")
+          mkdir -p .diag
+          {
+            echo "실패 진단 · $(date -u -d '+9 hours' '+%Y-%m-%d %H:%M') KST"
+            echo "run_id: ${{ github.run_id }}"
+            echo "probe_exit_code: ${CODE}"
+            if [ "$CODE" = "0" ]; then
+              echo "판정: 인증·한도는 정상 (1턴 probe 성공). 수집 작업 자체에서 실패했다."
+            else
+              echo "판정: 1턴 probe도 실패. 토큰 만료 또는 사용량 한도 소진 가능성이 높다."
+            fi
+            echo "--- probe 출력 (마지막 40줄) ---"
+            printf '%s\n' "$OUT" | tail -40
+          } > .diag/last-failure.txt
+          cat .diag/last-failure.txt
+
       # The guard's input for later runs today, written by the workflow rather than
       # by Claude so that a run which died partway is recorded as partial and stays
       # retryable by the backup schedule.
@@ -135,6 +168,8 @@ jobs:
           git fetch origin main
           git rebase origin/main || { git rebase --abort; echo "rebase failed, continuing on local base"; }
           git add index.html data-log.json .run-status
+          # Present only when the diagnosis step above ran, so guard the add.
+          [ -d .diag ] && git add .diag
           if git diff --cached --quiet; then
             echo "GIT RESULT: NOCHANGE"
           else
