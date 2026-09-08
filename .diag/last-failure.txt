@@ -1,0 +1,6 @@
+실패 진단 · 2026-09-08 16:31 KST
+run_id: 34199209373
+probe_exit_code: 1
+판정: 1턴 probe도 실패. 토큰 만료 또는 사용량 한도 소진 가능성이 높다.
+--- probe 출력 (마지막 40줄) ---
+You've hit your session limit · resets 9:40am (UTC)
