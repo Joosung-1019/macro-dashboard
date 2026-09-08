@@ -2,11 +2,16 @@ name: Daily Macro Dashboard Update
 
 on:
   schedule:
-    # Two attempts a day. GitHub does not guarantee scheduled runs fire on time
-    # (delays of hours, and occasional skipped days, are normal), so the second
-    # slot is a safety net: it exits immediately when the first one succeeded.
-    - cron: '0 0 * * *'   # 09:00 KST (UTC+9) — primary
-    - cron: '0 3 * * *'   # 12:00 KST (UTC+9) — backup, skipped if today's data already landed
+    # Three attempts a day. GitHub does not guarantee scheduled runs fire on
+    # time, and the backlog is worst at the top of the hour: the 00:00 UTC slot
+    # drifted 2-3 hours on 09-05 and 09-07 and was dropped outright on 09-08.
+    # Every slot is therefore offset to :20 rather than sitting on the hour, and
+    # each one lands shortly before one of the mirroring retries (11:30 / 14:00
+    # / 17:00 KST), so a slot that is skipped or fails still has a successor the
+    # same day. Later slots exit immediately when an earlier one succeeded.
+    - cron: '20 0 * * *'   # 09:20 KST (UTC+9) — primary
+    - cron: '20 3 * * *'   # 12:20 KST (UTC+9) — backup
+    - cron: '20 6 * * *'   # 15:20 KST (UTC+9) — last chance before the 17:00 mirror
   workflow_dispatch: {}
 
 permissions:
@@ -15,7 +20,10 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Two Claude attempts capped at 15 minutes each (a normal collection takes
+    # 6-8), plus setup. Generous on purpose: this ceiling exists to stop a hung
+    # run from burning a whole hour, not to cut a working one short.
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -71,16 +79,38 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          # Pinned rather than left to the CLI default: this job's output is investment
-          # data, and a default that shifts under us would change how the numbers are
-          # read without any signal here. Sonnet 5 suits the work — prompt.txt already
-          # fixes the search terms, sources, thresholds and output format, so this is
-          # precise execution of a specified procedure, not open-ended reasoning.
-          claude -p "$(cat .github/workflows/prompt.txt)" \
-            --model claude-sonnet-5 \
-            --allowedTools "Bash,Read,Write,Edit,WebSearch,WebFetch" \
-            --max-turns 60 \
-            --output-format text
+          # Two attempts. On 2026-09-08 this step died after 76 seconds against a
+          # normal runtime of 6-8 minutes — the kind of failure (a transient API
+          # error, a hiccup on the first call) that a second try recovers, while a
+          # real fault such as an expired token or an exhausted quota fails twice
+          # and is correctly recorded as partial. Retrying is safe because the work
+          # is idempotent: prompt.txt re-reads index.html and replaces values in
+          # place, so a second pass over a half-updated file converges to the same
+          # result rather than compounding the first pass.
+          # The model is pinned rather than left to the CLI default: this job's output
+          # is investment data, and a default that shifts under us would change how the
+          # numbers are read without any signal here. Sonnet 5 suits the work —
+          # prompt.txt already fixes the search terms, sources, thresholds and output
+          # format, so this is precise execution of a specified procedure, not
+          # open-ended reasoning.
+          for attempt in 1 2; do
+            echo "::group::Claude 실행 시도 ${attempt}/2"
+            # Bounded so one wedged attempt cannot eat the budget of the other.
+            if timeout 15m claude -p "$(cat .github/workflows/prompt.txt)" \
+                 --model claude-sonnet-5 \
+                 --allowedTools "Bash,Read,Write,Edit,WebSearch,WebFetch" \
+                 --max-turns 60 \
+                 --output-format text; then
+              echo "::endgroup::"
+              echo "::notice::Claude 실행 성공 (시도 ${attempt}/2)"
+              exit 0
+            fi
+            echo "::endgroup::"
+            echo "::warning::Claude 실행 실패 (시도 ${attempt}/2)"
+            if [ "$attempt" = 1 ]; then sleep 60; fi
+          done
+          echo "::error::Claude 실행이 2회 모두 실패했습니다. 이번 실행은 부분갱신으로 기록됩니다."
+          exit 1
 
       # The guard's input for later runs today, written by the workflow rather than
       # by Claude so that a run which died partway is recorded as partial and stays
