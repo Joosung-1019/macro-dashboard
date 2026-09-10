@@ -4,10 +4,22 @@ name: Daily Macro Dashboard Update
 # GitHub Actions 의 예약 실행은 2026-09-05 이후 2~7.5시간씩 밀렸다. 예약 슬롯을
 # 3개까지 늘려도 실제 발화는 13:53~20:33 KST 로 흩어져서 "아침 9시 갱신"을
 # 지킬 수 없었다. 그래서 시계 역할은 정시 발화(09:07~09:11 KST)가 확인된
-# claude.ai 루틴이 맡고, 이 워크플로는 루틴이 workflow_dispatch 로 깨울 때만
-# 실행된다. 수동 실행(Actions 탭의 Run workflow)도 같은 입구를 쓴다.
+# claude.ai 루틴이 맡는다.
+#
+# 루틴이 이 워크플로를 깨우는 방법은 .trigger 파일에 커밋을 하나 미는 것이다.
+# API(workflow_dispatch)를 쓰지 않는 이유: 루틴 샌드박스의 GitHub 접근은
+# Claude GitHub 앱을 통하는데 그 앱에는 Actions 실행 권한이 없어
+# POST .../dispatches 가 403 "Resource not accessible by integration" 으로 막힌다.
+# 반면 저장소를 push 권한으로 붙이면 git push 는 정상 동작한다.
+#
+# paths 로 .trigger 만 잡는 이유: 이 워크플로 자신이 index.html/data-log.json 을
+# 커밋해서 되밀기 때문에, 경로 제한이 없으면 자기 커밋이 다시 자신을 깨워
+# 무한 루프가 된다. .trigger 는 루틴만 건드리므로 루프가 생기지 않는다.
 on:
   workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths: ['.trigger']
 
 permissions:
   contents: write
