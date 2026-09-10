@@ -1,37 +1,12 @@
 name: Daily Macro Dashboard Update
 
+# cron 이 없는 이유:
+# GitHub Actions 의 예약 실행은 2026-09-05 이후 2~7.5시간씩 밀렸다. 예약 슬롯을
+# 3개까지 늘려도 실제 발화는 13:53~20:33 KST 로 흩어져서 "아침 9시 갱신"을
+# 지킬 수 없었다. 그래서 시계 역할은 정시 발화(09:07~09:11 KST)가 확인된
+# claude.ai 루틴이 맡고, 이 워크플로는 루틴이 workflow_dispatch 로 깨울 때만
+# 실행된다. 수동 실행(Actions 탭의 Run workflow)도 같은 입구를 쓴다.
 on:
-  schedule:
-    # Anchors placed so the whole delay envelope lands after the US close and
-    # before the mirroring routines. Read the delay numbers below as provisional:
-    # GitHub does not report which cron produced a run (the API run object has no
-    # cron field at all), so everything here was inferred from fire times, and the
-    # inference is ambiguous on days when a slot is dropped. The "Record which slot
-    # fired and how late" step now writes github.event.schedule to
-    # .diag/schedule-log.tsv; once that has a week of rows, re-derive these anchors
-    # from measurement and delete this caveat.
-    #
-    # What is NOT inferred, because it needs no slot assignment: the gap between a
-    # day's earliest slot and its first actual run. That was 3-9 minutes every day
-    # from 08-29 to 09-04, then 142/451/178/168/272/273 minutes from 09-05 to 09-10
-    # — a regime change with no warning, topping out at 7.5 hours, not the 5 hours
-    # an earlier version of this comment claimed.
-    #
-    # The envelope is bracketed by two walls. After 05:00 KST the US session has
-    # closed, so the searched quotes (usdkrw, dxy, vix, wti) are a settled close
-    # rather than a mid-session snapshot. And the run has to land in hours when
-    # nothing else is drawing on the Claude subscription's rolling 5-hour session
-    # window: both recorded failures came from breaking that one — the old 09:20 KST
-    # anchor drifted into the working day and .diag/last-failure.txt caught a 1-turn
-    # probe rejected with "You've hit your session limit".
-    #
-    # 20:20 UTC puts the primary at 05:20 KST, the earliest anchor that clears the
-    # close. The backups trail it three hours apart; the last one can, on a bad day,
-    # finish after the 17:00 KST mirror and be wasted, which costs nothing because
-    # the guard makes every slot a no-op once one has succeeded.
-    - cron: '20 20 * * *'  # 05:20 KST next day — primary, just after the US close
-    - cron: '20 23 * * *'  # 08:20 KST next day — backup
-    - cron: '20 2 * * *'   # 11:20 KST — last resort before the 17:00 KST mirror
   workflow_dispatch: {}
 
 permissions:
@@ -40,10 +15,7 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
-    # Two Claude attempts capped at 15 minutes each (a normal collection takes
-    # 6-8), plus setup. Generous on purpose: this ceiling exists to stop a hung
-    # run from burning a whole hour, not to cut a working one short.
-    timeout-minutes: 40
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,141 +27,41 @@ jobs:
       - name: Ensure we are on a real local branch (not detached HEAD)
         run: git checkout -B main origin/main
 
-      # Decides whether this run has anything to do. The signal is .run-status,
-      # written by the workflow itself (not by Claude) at the end of every run as
-      # "<KST date> ok" or "<KST date> partial". Only "<today> ok" means the day is
-      # genuinely finished; a partial run must stay retryable, which is why
-      # data-log.json's meta.lastRun is NOT used for this decision — Claude can die
-      # after writing that field, and trusting it would let a half-finished day
-      # block its own backup run for the rest of the day.
-      # Fails open: a missing or unreadable marker never equals "<today> ok", so the
-      # run proceeds rather than silently skipping.
-      # workflow_dispatch always proceeds — a manual click means "run it now".
-      - name: Decide whether today's collection already completed
-        id: guard
-        run: |
-          TODAY_KST=$(date -u -d '+9 hours' '+%Y-%m-%d')
-          RUN_STATUS=$(cat .run-status 2>/dev/null || echo "")
-          LAST_RUN=$(python3 -c "import json; print(json.load(open('data-log.json'))['meta'].get('lastRun',''))" 2>/dev/null || echo "")
-          echo "today (KST)  = ${TODAY_KST}"
-          echo ".run-status  = ${RUN_STATUS:-<none>}"
-          echo "meta.lastRun = ${LAST_RUN:-<none>}   (참고용, 판단에는 쓰지 않음)"
-          if [ "${{ github.event_name }}" = "schedule" ] && [ "$RUN_STATUS" = "$TODAY_KST ok" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::오늘(${TODAY_KST}) 수집이 이미 정상 완료되어 이 실행은 건너뜁니다."
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::오늘(${TODAY_KST}) 수집이 아직 정상 완료되지 않았습니다. 수집을 진행합니다."
-          fi
-
-      # 어떤 cron 슬롯이 이 실행을 냈는지는 워크플로 안에서만 알 수 있다. GitHub의
-      # 런 객체(API)에는 cron 필드가 아예 없어서, 밖에서는 발화 시각으로 역산하는
-      # 수밖에 없고 그 역산은 슬롯이 누락된 날 틀린다 — 실제로 09-09의 지연을
-      # 92/114/673분으로도, 272/294/313분으로도 읽을 수 있었다. github.event.schedule
-      # 은 발화한 cron 문자열 그 자체이므로 여기서 기록해 두면 추정이 사라진다.
-      # 로그 아카이브는 별도 호스트라 일부 네트워크에서 막히므로(.diag/last-failure.txt
-      # 가 저장소에 쓰이는 것과 같은 이유) 저장소 파일로 남겨 raw로 읽는다.
-      # 슬롯이 건너뛰어진 실행도 '그 슬롯이 몇 시에 떴는지'는 알려주므로 always()다.
-      - name: Record which slot fired and how late
-        if: always()
-        continue-on-error: true
-        env:
-          FIRED_CRON: ${{ github.event.schedule }}
-          EVENT_NAME: ${{ github.event_name }}
-          SKIPPED: ${{ steps.guard.outputs.skip }}
-        run: |
-          mkdir -p .diag
-          [ -f .diag/schedule-log.tsv ] || \
-            printf 'fired_utc\tfired_kst\tevent\tcron\tdelay_min\tskipped\n' > .diag/schedule-log.tsv
-          python3 - >> .diag/schedule-log.tsv <<'PYEOF'
-          import datetime, os
-          now = datetime.datetime.now(datetime.timezone.utc)
-          cron = os.environ.get("FIRED_CRON", "").strip()
-          delay = "-"
-          if cron:
-              f = cron.split()
-              if len(f) >= 2 and f[0].isdigit() and f[1].isdigit():
-                  nominal = now.replace(hour=int(f[1]), minute=int(f[0]),
-                                        second=0, microsecond=0)
-                  # 예정 시각이 아직 오지 않았다면 어제 슬롯이 늦게 뜬 것이다.
-                  if nominal > now:
-                      nominal -= datetime.timedelta(days=1)
-                  delay = str(int((now - nominal).total_seconds() // 60))
-          print("\t".join([
-              now.strftime("%Y-%m-%dT%H:%MZ"),
-              (now + datetime.timedelta(hours=9)).strftime("%m-%d %H:%M"),
-              os.environ.get("EVENT_NAME", "-"),
-              cron or "-",
-              delay,
-              os.environ.get("SKIPPED", "-") or "-",
-          ]))
-          PYEOF
-          tail -1 .diag/schedule-log.tsv
-
-      # Runs before Claude and without it. Thirteen of the nineteen indicators
-      # come from FRED, which serves plain CSV with no API key, so collecting
-      # them here takes them off the subscription quota entirely: on a day when
-      # the session limit is exhausted and Claude cannot run at all, those
-      # thirteen are still current instead of the whole board freezing on
-      # yesterday's numbers. It also shrinks Claude's own job from seventeen web
-      # searches to six, which makes exhausting the quota less likely to begin
-      # with, and the values are exact rather than parsed out of search snippets.
-      # continue-on-error: a FRED outage must not fail the run — prompt.txt
-      # treats any key missing from fred-latest.json as "keep the previous value".
+      # 19개 지표 중 13개는 FRED 가 원본이고 API 키 없이 CSV 로 받을 수 있다.
+      # 여기서 받아두면 Claude 사용량을 전혀 쓰지 않고, 검색 스니펫을 파싱하는
+      # 것보다 값도 정확하다. Claude 가 맡는 몫은 6개로 줄어든다.
+      # continue-on-error: FRED 장애가 전체 실행을 실패시키면 안 된다.
+      # prompt.txt 는 오늘 날짜가 안 들어온 지표를 "이전 값 유지"로 처리한다.
       - name: Collect FRED series (no Claude, no quota)
-        id: fred
-        if: steps.guard.outputs.skip != 'true'
         continue-on-error: true
         run: python3 .github/scripts/fetch-fred.py
 
-      # 수집한 값을 화면까지 밀어 넣는다. 이 단계가 있고 없고의 차이가 크다 —
-      # 없으면 13개를 받아놓고도 반영은 Claude가 하므로, Claude가 한도에 걸린 날은
-      # 대시보드가 19개 전부 어제 값에 멈춘다(09-08, 09-10이 그랬다). 여기서
-      # 반영해 두면 아래 Claude 단계가 통째로 실패해도 커밋 단계가 이 13개를
-      # 그대로 올린다.
-      # continue-on-error: 패치 지점을 정확히 못 찾으면 스크립트가 아무것도 쓰지
-      # 않고 1로 끝난다. 그 경우 index.html은 손대지 않은 상태이므로 Claude가
-      # 기존대로 19개를 전부 처리하는 경로로 자연스럽게 되돌아간다.
+      # 받아온 13개를 화면까지 반영한다. 이 단계가 있어야 Claude 가 실패한 날에도
+      # 13개는 오늘 값으로 남는다.
       - name: Apply FRED series to the dashboard (no Claude, no quota)
-        id: apply
-        if: steps.guard.outputs.skip != 'true'
         continue-on-error: true
         run: python3 .github/scripts/update-dashboard.py
 
       - name: Set up Node
-        if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install Claude Code CLI
-        if: steps.guard.outputs.skip != 'true'
         run: npm install -g @anthropic-ai/claude-code
 
-      - name: Run Claude to update dashboard data
+      - name: Run Claude for the remaining 6 indicators
         id: claude_run
-        if: steps.guard.outputs.skip != 'true'
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          # Two attempts. On 2026-09-08 this step died after 76 seconds against a
-          # normal runtime of 6-8 minutes — the kind of failure (a transient API
-          # error, a hiccup on the first call) that a second try recovers, while a
-          # real fault such as an expired token or an exhausted quota fails twice
-          # and is correctly recorded as partial. Retrying is safe because the work
-          # is idempotent: prompt.txt re-reads index.html and replaces values in
-          # place, so a second pass over a half-updated file converges to the same
-          # result rather than compounding the first pass.
-          # The model is pinned rather than left to the CLI default: this job's output
-          # is investment data, and a default that shifts under us would change how the
-          # numbers are read without any signal here. Sonnet 5 suits the work —
-          # prompt.txt already fixes the search terms, sources, thresholds and output
-          # format, so this is precise execution of a specified procedure, not
-          # open-ended reasoning.
+          # 2회 시도. 일시적인 API 오류는 재시도로 살아나고, 토큰 만료나 사용량
+          # 소진 같은 진짜 문제는 두 번 다 실패해 부분갱신으로 기록된다.
+          # 재시도가 안전한 이유: prompt.txt 는 index.html 을 다시 읽어 값을
+          # 제자리 치환하므로, 반쯤 갱신된 파일에 다시 돌려도 같은 결과로 수렴한다.
           for attempt in 1 2; do
             echo "::group::Claude 실행 시도 ${attempt}/2"
-            # Bounded so one wedged attempt cannot eat the budget of the other.
             if timeout 15m claude -p "$(cat .github/workflows/prompt.txt)" \
                  --model claude-sonnet-5 \
                  --allowedTools "Bash,Read,Write,Edit,WebSearch,WebFetch" \
@@ -201,61 +73,13 @@ jobs:
             fi
             echo "::endgroup::"
             echo "::warning::Claude 실행 실패 (시도 ${attempt}/2)"
-            if [ "$attempt" = 1 ]; then sleep 60; fi
+            [ "$attempt" = 1 ] && sleep 60
           done
-          echo "::error::Claude 실행이 2회 모두 실패했습니다. 이번 실행은 부분갱신으로 기록됩니다."
+          echo "::error::Claude 실행이 2회 모두 실패했습니다. 부분갱신으로 기록됩니다."
           exit 1
 
-      # Only on a failed collection, and only to answer one question the run logs
-      # would answer if they were reachable: did the CLI fail because the account
-      # cannot talk to the API at all, or because the collection itself broke?
-      # A one-turn probe separates the two, and the verdict is committed to the
-      # repo because the log archive sits behind a host that some networks deny —
-      # .diag/last-failure.txt is readable over raw.githubusercontent.com.
-      - name: Diagnose a failed collection
-        if: always() && steps.guard.outputs.skip != 'true' && steps.claude_run.outcome == 'failure'
-        continue-on-error: true
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-        run: |
-          set +e
-          OUT=$(timeout 3m claude -p "Reply with exactly: PONG" --max-turns 1 --output-format text 2>&1)
-          CODE=$?
-          # Actions masks secrets in the run log but NOT in files the job writes,
-          # so strip the token explicitly before this text is committed.
-          OUT=$(printf '%s' "$OUT" | sed "s|${CLAUDE_CODE_OAUTH_TOKEN}|<redacted>|g")
-          mkdir -p .diag
-          {
-            echo "실패 진단 · $(date -u -d '+9 hours' '+%Y-%m-%d %H:%M') KST"
-            echo "run_id: ${{ github.run_id }}"
-            echo "probe_exit_code: ${CODE}"
-            if [ "$CODE" = "0" ]; then
-              echo "판정: 인증·한도는 정상 (1턴 probe 성공). 수집 작업 자체에서 실패했다."
-            else
-              echo "판정: 1턴 probe도 실패. 토큰 만료 또는 사용량 한도 소진 가능성이 높다."
-            fi
-            echo "--- probe 출력 (마지막 40줄) ---"
-            printf '%s\n' "$OUT" | tail -40
-          } > .diag/last-failure.txt
-          cat .diag/last-failure.txt
-
-      # The guard's input for later runs today, written by the workflow rather than
-      # by Claude so that a run which died partway is recorded as partial and stays
-      # retryable by the backup schedule.
-      - name: Record whether the collection completed
-        if: always() && steps.guard.outputs.skip != 'true'
-        run: |
-          TODAY_KST=$(date -u -d '+9 hours' '+%Y-%m-%d')
-          if [ "${{ steps.claude_run.outcome }}" = "success" ]; then S=ok; else S=partial; fi
-          echo "${TODAY_KST} ${S}" > .run-status
-          echo "::notice::수집 결과 기록: ${TODAY_KST} ${S}"
-
-      # Runs even if the Claude step above failed partway through — whatever
-      # index.html / data-log.json changes it DID manage to write to disk
-      # before failing still get committed, so a partial run is never lost.
-      # skip 여부와 무관하게 돈다: 건너뛴 실행도 .diag/schedule-log.tsv 한 줄을
-      # 남기므로 커밋할 것이 있다. 데이터 파일이 그대로면 git diff가 비어
-      # NOCHANGE로 끝나니 불필요한 커밋은 생기지 않는다.
+      # Claude 단계가 실패해도 돈다 — 그때까지 디스크에 써진 변경(FRED 13개 포함)은
+      # 그대로 올린다. 부분갱신은 커밋 메시지에 표시해 git log 에서 바로 보인다.
       - name: Commit and push if changed
         if: always()
         run: |
@@ -263,15 +87,12 @@ jobs:
           git config user.name "Joosung-1019"
           git config user.email "jugul1019@gmail.com"
           git fetch origin main
-          git rebase origin/main || { git rebase --abort; echo "rebase failed, continuing on local base"; }
-          git add index.html data-log.json .run-status
-          # Present only when the diagnosis step above ran, so guard the add.
-          [ -d .diag ] && git add .diag
+          git rebase origin/main || { git rebase --abort; echo "rebase 실패, 로컬 기준으로 진행"; }
+          git add index.html data-log.json
           if git diff --cached --quiet; then
             echo "GIT RESULT: NOCHANGE"
           else
             KST_NOW=$(date -u -d '+9 hours' '+%Y-%m-%d %H:%M')
-            # Marks the commit so a half-finished day is visible in git log, not just in the run logs.
             TAG=""
             [ "${{ steps.claude_run.outcome }}" = "success" ] || TAG=" [부분갱신]"
             git commit -m "자동 갱신(GitHub Actions): ${KST_NOW}${TAG}"
@@ -279,6 +100,6 @@ jobs:
             echo "GIT RESULT: SUCCESS"
           fi
 
-      - name: Fail the run if claude step failed (for visibility)
+      - name: Fail the run if the Claude step failed (for visibility)
         if: steps.claude_run.outcome == 'failure'
         run: exit 1
