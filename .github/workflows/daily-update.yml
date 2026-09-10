@@ -2,25 +2,29 @@ name: Daily Macro Dashboard Update
 
 on:
   schedule:
-    # Scheduled slots sit in the Korean night, and that placement is the whole
-    # point of these three lines.
+    # Scheduled slots are placed so the whole delay envelope lands after the US
+    # close and before the mirroring routines — that placement is the point.
     #
-    # GitHub fires these late — measured drift was +4h32m / +4h54m / +5h13m on
-    # 09-09 and +4h33m on 09-10, against 3-9 minutes back on 08-29..09-04. The
-    # earlier schedule (00:20 UTC = 09:20 KST) had no room to absorb that: any
-    # delay pushed the run into the middle of the user's working day, where the
-    # Claude subscription's rolling 5-hour session window is already spent. Both
-    # recorded failures are exactly that — .diag/last-failure.txt shows a 1-turn
-    # probe rejected with "You've hit your session limit" on 09-08 and 09-10.
+    # Two constraints bracket the window. GitHub fires these late: measured
+    # drift was +4h32m/+4h54m/+5h13m on 09-09 and +4h33m on 09-10, against
+    # 3-9 minutes back on 08-29..09-04, so the real run time is "scheduled +0..5h"
+    # and every anchor must be judged as a five-hour span, not a point.
+    # And the span has to sit between two walls: after 05:00 KST, when the US
+    # session closes and the searched quotes (usdkrw, dxy, vix, wti) become a
+    # settled close rather than a mid-session snapshot; and inside the hours when
+    # nothing else is drawing on the Claude subscription's rolling 5-hour session
+    # window. Both recorded failures came from violating the second wall — the
+    # old 09:20 KST anchor drifted into the working day and .diag/last-failure.txt
+    # caught a 1-turn probe rejected with "You've hit your session limit".
     #
-    # Anchoring at 17:20/20:20/23:20 UTC means the whole delay envelope — on
-    # time through five hours late — lands between 02:20 and 13:30 KST, i.e.
-    # overnight or early morning, when nothing else is drawing on the quota, and
-    # always before the 16:00 KST mirroring retry. Later slots exit immediately
-    # when an earlier one succeeded.
-    - cron: '20 17 * * *'  # 02:20 KST next day — primary
-    - cron: '20 20 * * *'  # 05:20 KST next day — backup
-    - cron: '20 23 * * *'  # 08:20 KST next day — last chance before the mirror
+    # 20:20 UTC anchors the primary at 05:20 KST, so its span is 05:20-10:30 KST:
+    # past the close, still quiet, and finished before the 11:00 KST mirror. The
+    # backups trail it; the third is a last resort that may reach into the
+    # afternoon, which is worth it only because the guard makes it a no-op once a
+    # slot has succeeded.
+    - cron: '20 20 * * *'  # 05:20 KST next day — primary, just after the US close
+    - cron: '20 23 * * *'  # 08:20 KST next day — backup
+    - cron: '20 2 * * *'   # 11:20 KST — last resort before the 17:00 KST mirror
   workflow_dispatch: {}
 
 permissions:
