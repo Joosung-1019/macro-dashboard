@@ -2,26 +2,33 @@ name: Daily Macro Dashboard Update
 
 on:
   schedule:
-    # Scheduled slots are placed so the whole delay envelope lands after the US
-    # close and before the mirroring routines — that placement is the point.
+    # Anchors placed so the whole delay envelope lands after the US close and
+    # before the mirroring routines. Read the delay numbers below as provisional:
+    # GitHub does not report which cron produced a run (the API run object has no
+    # cron field at all), so everything here was inferred from fire times, and the
+    # inference is ambiguous on days when a slot is dropped. The "Record which slot
+    # fired and how late" step now writes github.event.schedule to
+    # .diag/schedule-log.tsv; once that has a week of rows, re-derive these anchors
+    # from measurement and delete this caveat.
     #
-    # Two constraints bracket the window. GitHub fires these late: measured
-    # drift was +4h32m/+4h54m/+5h13m on 09-09 and +4h33m on 09-10, against
-    # 3-9 minutes back on 08-29..09-04, so the real run time is "scheduled +0..5h"
-    # and every anchor must be judged as a five-hour span, not a point.
-    # And the span has to sit between two walls: after 05:00 KST, when the US
-    # session closes and the searched quotes (usdkrw, dxy, vix, wti) become a
-    # settled close rather than a mid-session snapshot; and inside the hours when
+    # What is NOT inferred, because it needs no slot assignment: the gap between a
+    # day's earliest slot and its first actual run. That was 3-9 minutes every day
+    # from 08-29 to 09-04, then 142/451/178/168/272/273 minutes from 09-05 to 09-10
+    # — a regime change with no warning, topping out at 7.5 hours, not the 5 hours
+    # an earlier version of this comment claimed.
+    #
+    # The envelope is bracketed by two walls. After 05:00 KST the US session has
+    # closed, so the searched quotes (usdkrw, dxy, vix, wti) are a settled close
+    # rather than a mid-session snapshot. And the run has to land in hours when
     # nothing else is drawing on the Claude subscription's rolling 5-hour session
-    # window. Both recorded failures came from violating the second wall — the
-    # old 09:20 KST anchor drifted into the working day and .diag/last-failure.txt
-    # caught a 1-turn probe rejected with "You've hit your session limit".
+    # window: both recorded failures came from breaking that one — the old 09:20 KST
+    # anchor drifted into the working day and .diag/last-failure.txt caught a 1-turn
+    # probe rejected with "You've hit your session limit".
     #
-    # 20:20 UTC anchors the primary at 05:20 KST, so its span is 05:20-10:30 KST:
-    # past the close, still quiet, and finished before the 11:00 KST mirror. The
-    # backups trail it; the third is a last resort that may reach into the
-    # afternoon, which is worth it only because the guard makes it a no-op once a
-    # slot has succeeded.
+    # 20:20 UTC puts the primary at 05:20 KST, the earliest anchor that clears the
+    # close. The backups trail it three hours apart; the last one can, on a bad day,
+    # finish after the 17:00 KST mirror and be wasted, which costs nothing because
+    # the guard makes every slot a no-op once one has succeeded.
     - cron: '20 20 * * *'  # 05:20 KST next day — primary, just after the US close
     - cron: '20 23 * * *'  # 08:20 KST next day — backup
     - cron: '20 2 * * *'   # 11:20 KST — last resort before the 17:00 KST mirror
@@ -74,6 +81,50 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "::notice::오늘(${TODAY_KST}) 수집이 아직 정상 완료되지 않았습니다. 수집을 진행합니다."
           fi
+
+      # 어떤 cron 슬롯이 이 실행을 냈는지는 워크플로 안에서만 알 수 있다. GitHub의
+      # 런 객체(API)에는 cron 필드가 아예 없어서, 밖에서는 발화 시각으로 역산하는
+      # 수밖에 없고 그 역산은 슬롯이 누락된 날 틀린다 — 실제로 09-09의 지연을
+      # 92/114/673분으로도, 272/294/313분으로도 읽을 수 있었다. github.event.schedule
+      # 은 발화한 cron 문자열 그 자체이므로 여기서 기록해 두면 추정이 사라진다.
+      # 로그 아카이브는 별도 호스트라 일부 네트워크에서 막히므로(.diag/last-failure.txt
+      # 가 저장소에 쓰이는 것과 같은 이유) 저장소 파일로 남겨 raw로 읽는다.
+      # 슬롯이 건너뛰어진 실행도 '그 슬롯이 몇 시에 떴는지'는 알려주므로 always()다.
+      - name: Record which slot fired and how late
+        if: always()
+        continue-on-error: true
+        env:
+          FIRED_CRON: ${{ github.event.schedule }}
+          EVENT_NAME: ${{ github.event_name }}
+          SKIPPED: ${{ steps.guard.outputs.skip }}
+        run: |
+          mkdir -p .diag
+          [ -f .diag/schedule-log.tsv ] || \
+            printf 'fired_utc\tfired_kst\tevent\tcron\tdelay_min\tskipped\n' > .diag/schedule-log.tsv
+          python3 - >> .diag/schedule-log.tsv <<'PYEOF'
+          import datetime, os
+          now = datetime.datetime.now(datetime.timezone.utc)
+          cron = os.environ.get("FIRED_CRON", "").strip()
+          delay = "-"
+          if cron:
+              f = cron.split()
+              if len(f) >= 2 and f[0].isdigit() and f[1].isdigit():
+                  nominal = now.replace(hour=int(f[1]), minute=int(f[0]),
+                                        second=0, microsecond=0)
+                  # 예정 시각이 아직 오지 않았다면 어제 슬롯이 늦게 뜬 것이다.
+                  if nominal > now:
+                      nominal -= datetime.timedelta(days=1)
+                  delay = str(int((now - nominal).total_seconds() // 60))
+          print("\t".join([
+              now.strftime("%Y-%m-%dT%H:%MZ"),
+              (now + datetime.timedelta(hours=9)).strftime("%m-%d %H:%M"),
+              os.environ.get("EVENT_NAME", "-"),
+              cron or "-",
+              delay,
+              os.environ.get("SKIPPED", "-") or "-",
+          ]))
+          PYEOF
+          tail -1 .diag/schedule-log.tsv
 
       # Runs before Claude and without it. Thirteen of the nineteen indicators
       # come from FRED, which serves plain CSV with no API key, so collecting
@@ -188,8 +239,11 @@ jobs:
       # Runs even if the Claude step above failed partway through — whatever
       # index.html / data-log.json changes it DID manage to write to disk
       # before failing still get committed, so a partial run is never lost.
+      # skip 여부와 무관하게 돈다: 건너뛴 실행도 .diag/schedule-log.tsv 한 줄을
+      # 남기므로 커밋할 것이 있다. 데이터 파일이 그대로면 git diff가 비어
+      # NOCHANGE로 끝나니 불필요한 커밋은 생기지 않는다.
       - name: Commit and push if changed
-        if: always() && steps.guard.outputs.skip != 'true'
+        if: always()
         run: |
           set +e
           git config user.name "Joosung-1019"
