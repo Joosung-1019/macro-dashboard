@@ -2,16 +2,25 @@ name: Daily Macro Dashboard Update
 
 on:
   schedule:
-    # Three attempts a day. GitHub does not guarantee scheduled runs fire on
-    # time, and the backlog is worst at the top of the hour: the 00:00 UTC slot
-    # drifted 2-3 hours on 09-05 and 09-07 and was dropped outright on 09-08.
-    # Every slot is therefore offset to :20 rather than sitting on the hour, and
-    # each one lands shortly before one of the mirroring retries (11:30 / 14:00
-    # / 17:00 KST), so a slot that is skipped or fails still has a successor the
-    # same day. Later slots exit immediately when an earlier one succeeded.
-    - cron: '20 0 * * *'   # 09:20 KST (UTC+9) — primary
-    - cron: '20 3 * * *'   # 12:20 KST (UTC+9) — backup
-    - cron: '20 6 * * *'   # 15:20 KST (UTC+9) — last chance before the 17:00 mirror
+    # Scheduled slots sit in the Korean night, and that placement is the whole
+    # point of these three lines.
+    #
+    # GitHub fires these late — measured drift was +4h32m / +4h54m / +5h13m on
+    # 09-09 and +4h33m on 09-10, against 3-9 minutes back on 08-29..09-04. The
+    # earlier schedule (00:20 UTC = 09:20 KST) had no room to absorb that: any
+    # delay pushed the run into the middle of the user's working day, where the
+    # Claude subscription's rolling 5-hour session window is already spent. Both
+    # recorded failures are exactly that — .diag/last-failure.txt shows a 1-turn
+    # probe rejected with "You've hit your session limit" on 09-08 and 09-10.
+    #
+    # Anchoring at 17:20/20:20/23:20 UTC means the whole delay envelope — on
+    # time through five hours late — lands between 02:20 and 13:30 KST, i.e.
+    # overnight or early morning, when nothing else is drawing on the quota, and
+    # always before the 16:00 KST mirroring retry. Later slots exit immediately
+    # when an earlier one succeeded.
+    - cron: '20 17 * * *'  # 02:20 KST next day — primary
+    - cron: '20 20 * * *'  # 05:20 KST next day — backup
+    - cron: '20 23 * * *'  # 08:20 KST next day — last chance before the mirror
   workflow_dispatch: {}
 
 permissions:
@@ -61,6 +70,22 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "::notice::오늘(${TODAY_KST}) 수집이 아직 정상 완료되지 않았습니다. 수집을 진행합니다."
           fi
+
+      # Runs before Claude and without it. Thirteen of the nineteen indicators
+      # come from FRED, which serves plain CSV with no API key, so collecting
+      # them here takes them off the subscription quota entirely: on a day when
+      # the session limit is exhausted and Claude cannot run at all, those
+      # thirteen are still current instead of the whole board freezing on
+      # yesterday's numbers. It also shrinks Claude's own job from seventeen web
+      # searches to six, which makes exhausting the quota less likely to begin
+      # with, and the values are exact rather than parsed out of search snippets.
+      # continue-on-error: a FRED outage must not fail the run — prompt.txt
+      # treats any key missing from fred-latest.json as "keep the previous value".
+      - name: Collect FRED series (no Claude, no quota)
+        id: fred
+        if: steps.guard.outputs.skip != 'true'
+        continue-on-error: true
+        run: python3 .github/scripts/fetch-fred.py
 
       - name: Set up Node
         if: steps.guard.outputs.skip != 'true'

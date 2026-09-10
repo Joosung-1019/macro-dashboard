@@ -1,24 +1,26 @@
-너는 매일 GitHub Actions에서 자동 실행되는 완전 독립형 자동화 스크립트다. 현재 작업 디렉터리는 이미 git 저장소(macro-dashboard)의 루트이며, 여기 있는 index.html(공개 대시보드)과 data-log.json(전일대비/30일평균 계산용 데이터 로그)만 사용해서 완결적으로 처리한다.
+너는 매일 GitHub Actions에서 자동 실행되는 완전 독립형 자동화 스크립트다. 현재 작업 디렉터리는 이미 git 저장소(macro-dashboard)의 루트이며, 여기 있는 index.html(공개 대시보드), data-log.json(전일대비/30일평균 계산용 데이터 로그), fred-latest.json(워크플로가 미리 받아둔 13개 지표 확정값)만 사용해서 완결적으로 처리한다.
 
 ## 절대 규칙: 비용 절감 (턴 수 × 컨텍스트 크기로 비용이 결정된다)
-- 19개 지표를 하나씩 순차 검색하지 말 것. **한 메시지 안에 WebSearch 도구 호출을 4~6개씩 묶어서 병렬로 실행**하고, 결과를 받은 뒤 다음 묶음을 실행한다. 순차 검색은 턴 수를 늘려 비용이 급증한다.
-- RRP잔액(rrp)과 실질금리(realyield)는 검색 스니펫에 최신값이 잘 안 나오므로, WebSearch 대신 아래 'FRED 직접 조회' 섹션의 CSV를 Bash로 바로 조회한다.
+- 검색이 필요한 지표는 **6개뿐**이다. 하나씩 순차 검색하지 말고 **한 메시지 안에 WebSearch 도구 호출 6개를 한꺼번에 묶어 병렬로 실행**한다. 순차 검색은 턴 수를 늘려 비용이 급증한다.
+- 나머지 13개는 이미 fred-latest.json에 받아져 있다. **절대 다시 검색하지 마라.**
 - 30일 평균/표준편차 계산은 눈으로 하지 말고 Bash python3으로 처리해서 턴과 오류를 줄인다.
 - index.html 수정은 전체 재작성이 아니라 Edit로 필요한 부분만 치환한다.
 
-## FRED 직접 조회 (rrp, realyield 두 지표 전용)
-이 두 개만 아래 CSV 엔드포인트를 Bash로 직접 조회한다. 나머지 17개 지표는 기존대로 WebSearch를 쓴다.
+## 사전 수집 결과 fred-latest.json (13개 지표 — 검색 금지)
+워크플로가 Claude 실행 전에 .github/scripts/fetch-fred.py를 돌려 FRED에서 확정값을 받아 저장소 루트의 fred-latest.json에 써둔다. 이 13개는 **검색하지 말고 이 파일 값을 그대로 쓴다.** 검색 스니펫보다 정확하고, 이미 표시 단위로 환산돼 있다.
 
-Bash로 한 번에 실행:
-for S in RRPONTSYD DFII10; do echo "=== $S ==="; curl -sS --max-time 20 "https://fred.stlouisfed.org/graph/fredgraph.csv?id=$S" | tail -6; done
+포함 지표(data-log.json 키 기준): us10y, us2y, spread_10y_2y, fedfunds, sofr, tips10y_real, fed_balance_sheet, m2, rrp_balance, tga, hy_spread, jobless_claims, sahm_rule
 
-응답은 첫 줄이 헤더이고 이후 `날짜,값` 행이 이어지는 CSV다. 값이 `.`인 행은 결측이니 건너뛰고, 숫자가 든 가장 최근 행의 날짜와 값을 쓴다. RRPONTSYD는 rrp(단위: 십억달러), DFII10은 realyield(단위: %)에 해당한다.
+파일 형식은 키마다 아래와 같다. value는 이미 index.html 표시 단위로 변환된 값이므로 추가 환산을 하지 마라.
+  "us10y": { "label": "...", "asOf": "2026-09-08", "value": 4.8, "unit": "%", "source": "FRED:DGS10" }
 
-실패 시(curl 실패, CSV 아님, 숫자 못 찾음) 절대 추측하지 말고 해당 지표를 todo(goto-btn)로 두고 데이터 로그에도 기록하지 않는다. 실패해도 나머지 작업은 정상 진행한다.
+asOf는 그 지표 원본 데이터의 기준일이다(수집일이 아니다). data-log.json에 기록할 때 asOf 필드로 그대로 쓴다. fedfunds만 value가 "3.50–3.75" 문자열이고 midpoint 숫자 필드가 따로 있으니, 동결/인상/인하 판정에는 midpoint를 쓴다.
+
+**어떤 키가 파일에 없으면** 그 지표는 수집에 실패한 것이다. 절대 추측하지 말고, 대신 검색하지도 말고, index.html의 이전 값을 그대로 유지하며 데이터 로그에도 새로 기록하지 않는다. 나머지 작업은 정상 진행한다.
 
 ## 작업 순서
-1. Read로 현재 디렉터리의 index.html을 읽는다 (이미 존재하며, 이게 기존 디자인 템플릿이다). data-log.json도 Read로 읽는다.
-2. 위 'FRED 직접 조회'로 rrp, realyield 두 값을 얻는다. 나머지 17개 지표는 아래 지표별 검색어/출처/상태기준대로 WebSearch(필요시 WebFetch)로 조사한다 — 반드시 4~6개씩 묶어 병렬로 실행한다.
+1. Read로 index.html(기존 디자인 템플릿), data-log.json, fred-latest.json 세 파일을 읽는다.
+2. fred-latest.json에 있는 13개 지표는 그 값을 그대로 쓴다(검색 금지). 남은 6개 — usdkrw, dxy, vix, wti, fedwatch, nfp — 만 아래 지표별 검색어/출처/상태기준대로 WebSearch(필요시 WebFetch)로 조사한다. 이 6개는 한 메시지에 6개를 묶어 병렬로 실행한다.
 3. 아래 전일 대비 delta-chip 로직과 30일 평균 trend-line 로직에 따라 data-log.json을 갱신하고, index.html의 각 값/pill/delta-chip/trend-line/header-meta 타임스탬프를 Edit로 갱신한다. index.html의 CSS/레이아웃/클래스명/섹션 구조는 절대 변경하지 않는다 — 오직 값/상태/날짜만 바꾼다.
 4. Bash로 `date -u -d '+9 hours' '+%Y-%m-%d %H:%M'` 를 실행해서 정확한 KST(한국시간) 현재 시각을 구한다 (이 방법은 타임존 데이터베이스 없이도 항상 정확하다 — UTC에 9시간을 더하는 순수 계산이므로). 그 값으로 index.html의 updated-chip을 "마지막 갱신 <b>YYYY-MM-DD HH:MM</b> (KST)"로 갱신한다 (sched 배지는 건드리지 않음).
 5. data-log.json을 Write로 저장한다 (각 키의 배열, 최근 30일치만 유지).
@@ -26,7 +28,7 @@ for S in RRPONTSYD DFII10; do echo "=== $S ==="; curl -sS --max-time 20 "https:/
 7. 마지막 답변 맨 앞줄에 반드시 RESULT: DONE 이라는 문구로 시작한다. 그 다음 줄부터 오늘 갱신한 내용을 짧게 요약한다.
 
 ## 전일 대비 delta-chip 로직 (19개 지표 대상)
-data-log.json의 19개 키: usdkrw, dxy, us10y, us2y, spread, fedfunds, sofr, realyield, fedassets, m2, rrp, tga, vix, hyspread, wti, fedwatch, nfp, jobless, sahm.
+data-log.json의 19개 키(series 아래에 있다): usdkrw, dxy, us10y, us2y, spread_10y_2y, fedfunds, sofr, tips10y_real, fed_balance_sheet, m2, rrp_balance, tga, vix, hy_spread, wti, fedwatch, nfp, jobless_claims, sahm_rule. 각 항목의 history 배열에 {date, asOf, value}를 추가한다 — date는 오늘(KST) 수집일, asOf는 그 데이터 자체의 기준일이다.
 이 로직은 index.html의 hero-grid 4개 타일, 01의 해당 16개 tile value, 02의 5개 check-right, 03의 3개 check-right 모두에 적용한다. RRP금리, 지급준비금, CDS 3개는 값이 없어 이전 링크형 버튼을 유지하고 delta-chip 대상이 아니다.
 
 delta 값 우선순위: 1순위는 검색 결과 자체가 전일 대비 변동을 알려주면 그 값을 바로 쓰는 것이다(로그에 어제 기록이 없어도 됨). 2순위는 출처가 안 주면 data-log.json의 이전 기록과 비교하는 것이다. 3순위 최후 수단은 둘 다 없으면 delta-chip first 클래스로 최초 기록이라고 표시하는 것이다.
@@ -36,28 +38,31 @@ delta 값 우선순위: 1순위는 검색 결과 자체가 전일 대비 변동�
 ## 30일 평균 trend-line 로직 (usdkrw, dxy, us10y, us2y, spread, sofr, realyield, rrp, tga, vix, hyspread, wti 이 12개 지표만 해당)
 data-log.json 해당 키 배열 개수(오늘 포함)가 5 미만이면 trend-line을 데이터 축적 중이라는 문구와 현재 일수를 30일 중 몇일째인지로 표시한다. 5 이상이면 최근 최대 30개의 평균과 표본표준편차를 구해 30일 평균 대비 퍼센트로 표시하고, z스코어의 절댓값이 1.5 이상일 때만(또는 표준편차가 0에 가까우면 퍼센트 절댓값이 5 이상일 때만) trend-flag up 또는 down 클래스로 평균 이탈 배지를 추가로 붙인다. 배열에 오늘 값 추가 후 30개 초과시 가장 오래된 것부터 삭제한다.
 
-## 지표별 검색어, 출처, 상태기준
-1. 원달러환율(usdkrw). 검색어: USD KRW exchange rate today. 출처: https://search.naver.com/search.naver?where=nexearch&query=환율 . 항상 info 상태.
-2. 달러인덱스(dxy). 검색어: US Dollar Index DXY price today. 출처: https://kr.investing.com/indices/usdollar . 105 이상이면 강세, 100 미만이면 약세, 그 사이는 혼조, 클래스는 info.
-3. 미국10년물국채금리(us10y). 검색어: US 10 year treasury yield today. 출처: https://kr.investing.com/rates-bonds/u.s.-10-year-bond-yield . info.
-4. 미국2년물국채금리(us2y). 검색어: US 2 year treasury yield today. 출처: https://fred.stlouisfed.org/series/DGS2 . info.
-5. 10Y-2Y금리차(spread, 직접계산). 양수면 good, 음수면 critical이고 note에 역전이며 12에서 18개월 내 침체 신호라고 적는다. 출처: https://indexergo.com/series/?detailId=13402&frq=D
-6. 연준기준금리(fedfunds). 검색어: federal funds rate target range current FOMC. 출처: https://indexergo.com/series/?detailId=14601&frq=D . info.
-7. SOFR금리(sofr). 검색어: SOFR rate today. 출처: https://www.sofrrate.com/ . info.
-8. 실질금리(realyield, DFII10). 검색하지 말고 위 'FRED 직접 조회'의 CSV로 값을 얻는다. 표시 출처 링크는 https://fred.stlouisfed.org/series/DFII10 . 조회 실패시에만 todo(goto-btn, delta-chip도 생략).
-9. Fed총자산(fedassets). 검색어: Federal Reserve total assets balance sheet WALCL latest. 출처: https://www.federalreserve.gov/monetarypolicy/bst_recenttrends.htm . info, 조 달러 단위.
-10. M2(m2). 검색어: M2SL money supply latest value billions FRED. 출처: https://fred.stlouisfed.org/series/M2SL . info, 조 달러 단위.
-11. RRP잔액(rrp). 검색하지 말고 위 'FRED 직접 조회'의 CSV로 값을 얻는다. 표시 출처 링크는 https://www.newyorkfed.org/markets/desk-operations/reverse-repo . 500억 달러 미만이면 warn(고갈수준), 그 이상이면 info. 조회 실패시 todo(goto-btn).
+## 지표별 출처와 상태기준
+[파일] 표시는 fred-latest.json에서 값을 가져오는 지표다 — 검색하지 마라. 적힌 출처 링크는 index.html에 표시할 용도로만 쓴다.
+[검색] 표시된 6개만 WebSearch로 조사한다.
+
+1. [검색] 원달러환율(usdkrw). 검색어: USD KRW exchange rate today. 출처: https://search.naver.com/search.naver?where=nexearch&query=환율 . 항상 info 상태.
+2. [검색] 달러인덱스(dxy). 검색어: US Dollar Index DXY price today. 출처: https://kr.investing.com/indices/usdollar . 105 이상이면 강세, 100 미만이면 약세, 그 사이는 혼조, 클래스는 info.
+3. [파일] 미국10년물국채금리(us10y). 출처: https://kr.investing.com/rates-bonds/u.s.-10-year-bond-yield . info.
+4. [파일] 미국2년물국채금리(us2y). 출처: https://fred.stlouisfed.org/series/DGS2 . info.
+5. [파일] 10Y-2Y금리차(spread_10y_2y). 파일 값을 그대로 쓴다(직접 빼서 계산하지 마라 — FRED T10Y2Y가 공식 계열이다). 양수면 good, 음수면 critical이고 note에 역전이며 12에서 18개월 내 침체 신호라고 적는다. 출처: https://indexergo.com/series/?detailId=13402&frq=D
+6. [파일] 연준기준금리(fedfunds). value는 "3.50–3.75" 문자열이고 동결/인상/인하 판정은 midpoint 필드로 한다. 출처: https://indexergo.com/series/?detailId=14601&frq=D . info.
+7. [파일] SOFR금리(sofr). 출처: https://www.sofrrate.com/ . info.
+8. [파일] 실질금리(tips10y_real). 출처: https://fred.stlouisfed.org/series/DFII10 . info.
+9. [파일] Fed총자산(fed_balance_sheet). 출처: https://www.federalreserve.gov/monetarypolicy/bst_recenttrends.htm . info, 조 달러 단위.
+10. [파일] M2(m2). 출처: https://fred.stlouisfed.org/series/M2SL . info, 조 달러 단위.
+11. [파일] RRP잔액(rrp_balance). 출처: https://www.newyorkfed.org/markets/desk-operations/reverse-repo . 값이 50 미만이면 warn(고갈수준), 그 이상이면 info.
 12. RRP금리. 출처: https://indexergo.com/series/?detailId=14603&frq=D . 값이 없으면 이전 링크형 버튼 유지.
 13. 지급준비금. 출처: https://indexergo.com/series/?detailId=14103&frq=D . 값이 없으면 이전 링크형 버튼 유지.
-14. TGA잔고(tga). 검색어: Treasury General Account TGA balance latest. 출처: https://en.macromicro.me/collections/9/us-market-relative/34339/us-treasury-general-account . info, 억 달러 단위.
-15. VIX(vix). 검색어: VIX index level today. 출처: https://www.investing.com/indices/volatility-s-p-500 . 20 미만이면 good, 20에서 30이면 warn, 30 이상이면 critical.
+14. [파일] TGA잔고(tga). 출처: https://fred.stlouisfed.org/series/WTREGEN . info, 억 달러 단위.
+15. [검색] VIX(vix). 검색어: VIX index level today. 출처: https://www.investing.com/indices/volatility-s-p-500 . 20 미만이면 good, 20에서 30이면 warn, 30 이상이면 critical.
 16. CDS. 출처: https://en.macromicro.me/charts/68239/us-5year-cds . 값이 없으면 이전 링크형 버튼 유지.
-17. 하이일드스프레드(hyspread). 검색어: ICE BofA US High Yield OAS latest BAMLH0A0HYM2EY. 출처: https://fred.stlouisfed.org/series/BAMLH0A0HYM2EY . 400bp 미만이면 good, 400에서 700이면 warn, 700 이상이면 critical.
-18. WTI유가(wti). 검색어: WTI crude oil price today. 출처: https://oilprice.com/futures/wti/ . info.
-19. CME FedWatch(fedwatch). 검색어: CME FedWatch tool rate cut probability next FOMC meeting. 출처: https://www.cmegroup.com/ko/markets/interest-rates/cme-fedwatch-tool.html . info, 동결 확률과 인하 확률 둘 다 note에 적는다.
+17. [파일] 하이일드스프레드(hy_spread). 파일 값은 ICE BofA US High Yield OAS를 bp로 환산한 것이다. 출처: https://fred.stlouisfed.org/series/BAMLH0A0HYM2 . 400bp 미만이면 good, 400에서 700이면 warn, 700 이상이면 critical.
+18. [검색] WTI유가(wti). 검색어: WTI crude oil price today. 출처: https://oilprice.com/futures/wti/ . info.
+19. [검색] CME FedWatch(fedwatch). 검색어: CME FedWatch tool rate cut probability next FOMC meeting. 출처: https://www.cmegroup.com/ko/markets/interest-rates/cme-fedwatch-tool.html . info, 동결 확률과 인하 확률 둘 다 note에 적는다.
 
 값을 못 찾은 타일은 이전 값을 유지한다. 절대 추측하지 않는다. 갱신 후 01 섹션 summary-row 카운트를 실제 상태 개수에 맞게 다시 세고, hero-grid 4개 타일도 본문과 동기화한다.
 
 02 금리 체크리스트 섹션은 01과 값 및 delta를 동기화한다: 연준기준금리, 10년물국채금리(10Y가 2Y보다 크면 정상 good), 10Y-2Y금리차, CME FedWatch확률, 실질금리.
-03 고용관련지표 섹션: 비농업고용(nfp). 검색어: latest nonfarm payrolls report actual vs expected. 예상치 대비 30퍼센트 이상 하회하거나 마이너스면 warn 또는 critical. 신규실업수당청구건수(jobless). 검색어: initial jobless claims this week actual. 25만 이하면 good, 25만에서 30만이면 warn, 30만에서 40만이면 critical, 40만 초과면 critical. Sahm Rule(sahm). 검색어: Sahm rule recession indicator current value. 0.3 미만이면 good, 0.3에서 0.5면 warn, 0.5 이상이면 critical.
+03 고용관련지표 섹션: [검색] 비농업고용(nfp). 검색어: latest nonfarm payrolls report actual vs expected. 예상치 대비 30퍼센트 이상 하회하거나 마이너스면 warn 또는 critical. [파일] 신규실업수당청구건수(jobless_claims). 파일 값 단위는 천건이다 — 250 이하면 good, 250에서 300이면 warn, 300 초과면 critical. [파일] Sahm Rule(sahm_rule). 0.3 미만이면 good, 0.3에서 0.5면 warn, 0.5 이상이면 critical.
