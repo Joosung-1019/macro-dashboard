@@ -142,6 +142,20 @@ jobs:
         continue-on-error: true
         run: python3 .github/scripts/fetch-fred.py
 
+      # 수집한 값을 화면까지 밀어 넣는다. 이 단계가 있고 없고의 차이가 크다 —
+      # 없으면 13개를 받아놓고도 반영은 Claude가 하므로, Claude가 한도에 걸린 날은
+      # 대시보드가 19개 전부 어제 값에 멈춘다(09-08, 09-10이 그랬다). 여기서
+      # 반영해 두면 아래 Claude 단계가 통째로 실패해도 커밋 단계가 이 13개를
+      # 그대로 올린다.
+      # continue-on-error: 패치 지점을 정확히 못 찾으면 스크립트가 아무것도 쓰지
+      # 않고 1로 끝난다. 그 경우 index.html은 손대지 않은 상태이므로 Claude가
+      # 기존대로 19개를 전부 처리하는 경로로 자연스럽게 되돌아간다.
+      - name: Apply FRED series to the dashboard (no Claude, no quota)
+        id: apply
+        if: steps.guard.outputs.skip != 'true'
+        continue-on-error: true
+        run: python3 .github/scripts/update-dashboard.py
+
       - name: Set up Node
         if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-node@v4
