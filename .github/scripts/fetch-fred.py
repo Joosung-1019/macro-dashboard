@@ -42,7 +42,9 @@ SERIES = [
     ("fed_balance_sheet", "WALCL",        1e-6,   2, "조$",   "Fed 대차대조표 총자산"),
     ("m2",                "M2SL",         1e-3,   2, "조$",   "M2 통화량"),
     ("rrp_balance",       "RRPONTSYD",    1.0,    2, "억$",   "RRP 잔액 (역레포)"),
-    ("tga",               "WTREGEN",      1e-3,   1, "억$",   "TGA 잔고"),
+    # TGA는 '잔고' 타일이므로 주간 평균(WTREGEN)이 아니라 수요일 시점 잔고인
+    # WDTGAL을 쓴다. 둘은 같은 날짜에도 20~30십억달러쯤 차이가 난다.
+    ("tga",               "WDTGAL",       1e-3,   1, "억$",   "TGA 잔고"),
     # 하이일드는 OAS(BAMLH0A0HYM2)가 맞다. BAMLH0A0HYM2EY는 유효수익률(7.22%)이라
     # bp로 환산하면 722bp가 나와 대시보드가 표시해 온 265bp와 전혀 다른 값이 된다.
     ("hy_spread",         "BAMLH0A0HYM2", 100.0,  0, "bp",   "하이일드 스프레드"),
