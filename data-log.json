@@ -1018,7 +1018,7 @@
     },
     "rrp_balance": {
       "label": "RRP 잔액 (역레포)",
-      "unit": "억$",
+      "unit": "십억$",
       "history": [
         {
           "date": "2026-08-23",
@@ -1119,7 +1119,7 @@
     },
     "tga": {
       "label": "TGA 잔고",
-      "unit": "억$",
+      "unit": "십억$",
       "history": [
         {
           "date": "2026-08-23",

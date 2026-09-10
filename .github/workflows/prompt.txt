@@ -55,7 +55,7 @@ data-log.json 해당 키 배열 개수(오늘 포함)가 5 미만이면 trend-li
 11. [파일] RRP잔액(rrp_balance). 출처: https://www.newyorkfed.org/markets/desk-operations/reverse-repo . 값이 50 미만이면 warn(고갈수준), 그 이상이면 info.
 12. RRP금리. 출처: https://indexergo.com/series/?detailId=14603&frq=D . 값이 없으면 이전 링크형 버튼 유지.
 13. 지급준비금. 출처: https://indexergo.com/series/?detailId=14103&frq=D . 값이 없으면 이전 링크형 버튼 유지.
-14. [파일] TGA잔고(tga). 출처: https://fred.stlouisfed.org/series/WTREGEN . info, 억 달러 단위.
+14. [파일] TGA잔고(tga). 출처: https://fred.stlouisfed.org/series/WDTGAL . info, 십억 달러 단위.
 15. [검색] VIX(vix). 검색어: VIX index level today. 출처: https://www.investing.com/indices/volatility-s-p-500 . 20 미만이면 good, 20에서 30이면 warn, 30 이상이면 critical.
 16. CDS. 출처: https://en.macromicro.me/charts/68239/us-5year-cds . 값이 없으면 이전 링크형 버튼 유지.
 17. [파일] 하이일드스프레드(hy_spread). 파일 값은 ICE BofA US High Yield OAS를 bp로 환산한 것이다. 출처: https://fred.stlouisfed.org/series/BAMLH0A0HYM2 . 400bp 미만이면 good, 400에서 700이면 warn, 700 이상이면 critical.
