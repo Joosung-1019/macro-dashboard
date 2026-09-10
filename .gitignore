@@ -1,3 +1,6 @@
 # 워크플로가 실행 중에 생성하는 FRED 수집 결과.
 # index.html / data-log.json 에 반영되고 나면 역할이 끝나므로 커밋하지 않는다.
 fred-latest.json
+
+# 스크립트를 모듈로 import해 테스트할 때 생기는 부산물.
+__pycache__/
