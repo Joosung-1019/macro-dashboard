@@ -46,13 +46,18 @@ jobs:
       # prompt.txt 는 오늘 날짜가 안 들어온 지표를 "이전 값 유지"로 처리한다.
       - name: Collect FRED series (no Claude, no quota)
         continue-on-error: true
-        run: python3 .github/scripts/fetch-fred.py
+        run: |
+          set -o pipefail
+          python3 .github/scripts/fetch-fred.py 2>&1 | tee -a .diag-run.txt
 
       # 받아온 13개를 화면까지 반영한다. 이 단계가 있어야 Claude 가 실패한 날에도
       # 13개는 오늘 값으로 남는다.
       - name: Apply FRED series to the dashboard (no Claude, no quota)
         continue-on-error: true
-        run: python3 .github/scripts/update-dashboard.py
+        run: |
+          set -o pipefail
+          echo "=== update-dashboard ===" >> .diag-run.txt
+          python3 .github/scripts/update-dashboard.py 2>&1 | tee -a .diag-run.txt
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -101,6 +106,7 @@ jobs:
           git fetch origin main
           git rebase origin/main || { git rebase --abort; echo "rebase 실패, 로컬 기준으로 진행"; }
           git add index.html data-log.json
+          [ -f .diag-run.txt ] && git add -f .diag-run.txt
           if git diff --cached --quiet; then
             echo "GIT RESULT: NOCHANGE"
           else
