@@ -145,7 +145,7 @@ def sub1(pattern, repl, text, what, literal=True):
 
 def patch_tile(html, label, value_html, trend_html, as_of, pill):
     """01 섹션 타일 하나를 갱신한다. tile-label 로 블록을 찾아 그 안만 바꾼다."""
-    m = re.search(rf'(<div class="tile-top"><span class="tile-label">{re.escape(label)}'
+    m = re.search(rf'(<div class="tile-top">\s*<span class="tile-label">{re.escape(label)}'
                   rf'(?:<span class="code">[^<]*</span>)?</span>)(.*?)(?=<div class="tile">|</div>\s*</div>\s*<p|\Z)',
                   html, re.S)
     if not m:
