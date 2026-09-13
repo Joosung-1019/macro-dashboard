@@ -4,3 +4,4 @@ fred-latest.json
 
 # 스크립트를 모듈로 import해 테스트할 때 생기는 부산물.
 __pycache__/
+.diag-run.txt

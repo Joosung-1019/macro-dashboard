@@ -39,25 +39,20 @@ jobs:
       - name: Ensure we are on a real local branch (not detached HEAD)
         run: git checkout -B main origin/main
 
-      # 19개 지표 중 13개는 FRED 가 원본이고 API 키 없이 CSV 로 받을 수 있다.
+      # 19개 지표 중 14개(FRED 13개 + 실시간 환율 1개)를 여기서 받는다.
       # 여기서 받아두면 Claude 사용량을 전혀 쓰지 않고, 검색 스니펫을 파싱하는
-      # 것보다 값도 정확하다. Claude 가 맡는 몫은 6개로 줄어든다.
+      # 것보다 값도 정확하다. Claude 가 맡는 몫은 5개로 줄어든다.
       # continue-on-error: FRED 장애가 전체 실행을 실패시키면 안 된다.
       # prompt.txt 는 오늘 날짜가 안 들어온 지표를 "이전 값 유지"로 처리한다.
       - name: Collect FRED series (no Claude, no quota)
         continue-on-error: true
-        run: |
-          set -o pipefail
-          python3 .github/scripts/fetch-fred.py 2>&1 | tee -a .diag-run.txt
+        run: python3 .github/scripts/fetch-fred.py
 
-      # 받아온 13개를 화면까지 반영한다. 이 단계가 있어야 Claude 가 실패한 날에도
-      # 13개는 오늘 값으로 남는다.
+      # 받아온 14개를 화면까지 반영한다. 이 단계가 있어야 Claude 가 실패한 날에도
+      # 14개는 오늘 값으로 남는다.
       - name: Apply FRED series to the dashboard (no Claude, no quota)
         continue-on-error: true
-        run: |
-          set -o pipefail
-          echo "=== update-dashboard ===" >> .diag-run.txt
-          python3 .github/scripts/update-dashboard.py 2>&1 | tee -a .diag-run.txt
+        run: python3 .github/scripts/update-dashboard.py
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -67,7 +62,7 @@ jobs:
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
-      - name: Run Claude for the remaining 6 indicators
+      - name: Run Claude for the remaining 5 indicators
         id: claude_run
         continue-on-error: true
         env:
@@ -106,7 +101,6 @@ jobs:
           git fetch origin main
           git rebase origin/main || { git rebase --abort; echo "rebase 실패, 로컬 기준으로 진행"; }
           git add index.html data-log.json
-          [ -f .diag-run.txt ] && git add -f .diag-run.txt
           if git diff --cached --quiet; then
             echo "GIT RESULT: NOCHANGE"
           else
