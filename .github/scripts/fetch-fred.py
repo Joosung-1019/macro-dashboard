@@ -80,6 +80,41 @@ def fetch_latest(series_id):
     raise ValueError("숫자가 든 행이 없음")
 
 
+# 원/달러는 FRED(DEXKOUS)가 H.10 주간 발표라 최신값이 일주일까지 밀린다. 대시보드는
+# 현물 환율을 보여주는 자리이므로 실시간 API를 1순위로 쓰고, 그게 막히면 FRED로
+# 내려간다. 둘 다 실패하면 값을 만들지 않고 건너뛴다(이전 값 유지).
+#
+# 이 지표를 스크립트로 옮긴 이유: 웹검색으로 받던 2026-09-10~13 동안 값이
+# 1386.01 → 1386.01 → 1341.25 → 1386.01 로 튀었다. 마지막 1386.01은 실제 시세
+# (약 1343)보다 43원 높은 사흘 전 값이 되돌아온 것이었다. 검색 스니펫은 날짜가
+# 불분명한 수치를 섞어 주므로 환율처럼 매일 변하는 값에는 쓰지 않는다.
+FX_URL = "https://open.er-api.com/v6/latest/USD"
+
+
+def fetch_usdkrw():
+    """(기준일, 원/달러) 반환. 실시간 API -> FRED 순으로 시도한다."""
+    try:
+        with urllib.request.urlopen(FX_URL, timeout=TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+        rate = data["rates"]["KRW"]
+        # time_last_update_utc 예: "Sun, 13 Sep 2026 00:02:31 +0000"
+        stamp = data.get("time_last_update_utc", "")
+        as_of = ""
+        parts = stamp.split()
+        if len(parts) >= 4:
+            months = {m: i for i, m in enumerate(
+                "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(), 1)}
+            if parts[2] in months:
+                as_of = f"{parts[3]}-{months[parts[2]]:02d}-{int(parts[1]):02d}"
+        if not as_of:
+            raise ValueError(f"날짜 형식을 못 읽음: {stamp!r}")
+        return as_of, float(rate), "ER-API"
+    except Exception as fx_exc:                       # noqa: BLE001
+        as_of, raw = fetch_latest("DEXKOUS")          # 실패하면 예외가 그대로 올라간다
+        print(f"  (환율 실시간 API 실패 -> FRED 대체: {fx_exc})")
+        return as_of, raw, "FRED:DEXKOUS"
+
+
 def main():
     out, failed = {}, []
 
@@ -116,6 +151,19 @@ def main():
         }
     except Exception as exc:                          # noqa: BLE001
         failed.append(f"{key}({lo_id}/{hi_id}): {exc}")
+
+    # 원/달러 환율 (FRED 계열이 아니라 실시간 API 우선)
+    try:
+        fx_as_of, fx_rate, fx_src = fetch_usdkrw()
+        out["usdkrw"] = {
+            "label": "원/달러 환율",
+            "asOf": fx_as_of,
+            "value": round(fx_rate, 2),
+            "unit": "원",
+            "source": fx_src,
+        }
+    except Exception as exc:                          # noqa: BLE001
+        failed.append(f"usdkrw: {exc}")
 
     with open(OUT_PATH, "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, indent=2)

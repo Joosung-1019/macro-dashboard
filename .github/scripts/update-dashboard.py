@@ -7,7 +7,7 @@ fetch-fred.py가 값을 받아오기만 하던 것을 여기서 화면까지 밀
 09-10이 그랬다). 이 스크립트를 Claude보다 먼저 돌리고 결과를 커밋하면, 그날
 Claude가 한 줄도 못 써도 13개는 화면에 최신값으로 남는다.
 
-Claude는 이후 남은 6개(usdkrw, dxy, vix, wti, fedwatch, nfp)만 처리한다.
+Claude는 이후 남은 5개(dxy, vix, wti, fedwatch, nfp)만 처리한다.
 
 안전 규칙: 패치 지점이 정확히 한 번 매칭되지 않으면 아무것도 쓰지 않고
 0이 아닌 코드로 끝난다. 절반만 고쳐진 HTML을 남기느니 통째로 손을 떼고
@@ -50,6 +50,10 @@ def pill_jobless(v):  return ("good", "안정") if v <= 250 else (("warn", "주�
 def pill_sahm(v):     return ("good", "안정") if v < 0.3 else (("warn", "주의") if v < 0.5 else ("critical", "경고"))
 
 SPEC = {
+    # 환율은 값이 커서 천단위 쉼표를 쓴다(1,343.03). 웹검색이 사흘 전 값을
+    # 되돌려 놓는 일이 있어 2026-09-13 에 스크립트 수집으로 옮겼다.
+    "usdkrw":            dict(tile="원/달러 환율", hero="원/달러 환율",
+                              dec=2, unit="KRW", trend=True, comma=True),
     "us10y":             dict(tile="美 10년물 국채금리", check="10년물 국채금리",
                               dec=2, unit="%", cunit="%", trend=True),
     "us2y":              dict(tile="美 2년물 국채금리", dec=2, unit="%", trend=True),
@@ -83,9 +87,9 @@ class Abort(Exception):
     """패치 지점을 확실히 못 찾았을 때. 아무것도 쓰지 않고 끝낸다."""
 
 
-def num(v, dec, sign=False):
-    s = f"{v:+.{dec}f}" if sign else f"{v:.{dec}f}"
-    return s
+def num(v, dec, sign=False, comma=False):
+    c = "," if comma else ""
+    return f"{v:+{c}.{dec}f}" if sign else f"{v:{c}.{dec}f}"
 
 
 def delta_chip(cur, prev, dec, is_range=False):
@@ -244,7 +248,7 @@ def main():
         pill = spec["pill"](cur_num) if spec.get("pill") else None
 
         if spec.get("tile"):
-            shown = raw if is_range else num(raw, dec, spec.get("sign", False))
+            shown = raw if is_range else num(raw, dec, spec.get("sign", False), spec.get("comma", False))
             value_html = (f'<span class="value">{shown}'
                           f'<span class="unit">{spec["unit"]}</span>{chip}</span>')
             trend = trend_line(hist, dec) if spec.get("trend") else None
@@ -253,7 +257,7 @@ def main():
                 html = patch_hero(html, spec["hero"], value_html)
 
         if spec.get("check"):
-            shown = raw if is_range else num(raw, dec, spec.get("sign", False))
+            shown = raw if is_range else num(raw, dec, spec.get("sign", False), spec.get("comma", False))
             html = patch_check(html, spec["check"], f'{shown}{spec["cunit"]}', chip, pill)
 
         touched.append(f'{key}={raw}{spec.get("unit") or spec.get("cunit","")}')
