@@ -11,8 +11,12 @@
 주간 발표라 최대 8일 밀려서 현물 시세로 쓸 수 없다. 그래서 별도 폴백 체인을
 둔다 — 아래 fetch_usdkrw 주석에 그동안 틀렸던 이력까지 적어 뒀다.
 
-남는 5개(dxy, vix, wti, fedwatch, nfp)는 FRED에 없거나(dxy·fedwatch), 실시간
-시세가 필요하거나(vix·wti), 예상치 대비 판단이 필요해서(nfp) Claude가 검색한다.
+달러인덱스·VIX·WTI도 같은 이유로 여기서 받는다. FRED에 없거나 지연되는데다,
+검색으로 받던 시절에는 asOf를 '수집일'로 적어서 시장이 닫힌 주말에도 그날짜
+값이 생겼다. 셋 다 환율과 같은 현물 시세 경로(_yahoo_quote)를 쓴다.
+
+Claude에게 남는 건 판단이 필요한 2개뿐이다 — fedwatch(선물 시장의 금리 전망)와
+nfp(예상치 대비 해석).
 
 출력은 저장소 루트의 fred-latest.json이며 커밋되지 않는다(.gitignore).
 prompt.txt가 이 파일을 Read해서 해당 지표의 검색을 건너뛴다.
@@ -24,6 +28,7 @@ prompt.txt가 이 파일을 Read해서 해당 지표의 검색을 건너뛴다.
 import datetime
 import json
 import sys
+import urllib.parse
 import urllib.request
 
 CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={}"
@@ -38,9 +43,6 @@ OUT_PATH = "fred-latest.json"
 #   ICSA    건    -> 천건   (1e-3)
 #   BAMLH0A0HYM2 % -> bp   (100)
 SERIES = [
-    ("us10y",             "DGS10",        1.0,    2, "%",    "美 10년물 국채금리"),
-    ("us2y",              "DGS2",         1.0,    2, "%",    "美 2년물 국채금리"),
-    ("spread_10y_2y",     "T10Y2Y",       1.0,    2, "%p",   "10Y-2Y 금리차"),
     ("sofr",              "SOFR",         1.0,    2, "%",    "SOFR 금리"),
     ("tips10y_real",      "DFII10",       1.0,    2, "%",    "실질금리 (10Y TIPS)"),
     ("fed_balance_sheet", "WALCL",        1e-6,   2, "조$",   "Fed 대차대조표 총자산"),
@@ -59,11 +61,24 @@ SERIES = [
 # 연준 기준금리만 하한·상한 두 시리즈를 묶어 "3.50–3.75" 문자열로 만든다.
 FEDFUNDS = ("fedfunds", "DFEDTARL", "DFEDTARU", "%", "연준 기준금리")
 
+# 서로 검산되는 지표는 같은 날짜로 맞춰야 한다. FRED 는 시리즈마다 발표 시점이
+# 달라서 각자 최신값을 쓰면 화면에서 산수가 안 맞는다. 2026-09-14 실행이 그랬다 —
+# DGS10·DGS2 는 09-10 까지인데 T10Y2Y 는 09-11 까지 나와 있어서 화면에
+#   10Y 4.95(09-10)   2Y 4.56(09-10)   금리차 0.33(09-11)
+# 이 걸렸다. 4.95 − 4.56 = 0.39 인데 금리차 칸은 0.33 이니 검산하는 사람은
+# 대시보드가 고장났다고 본다(09-10 의 T10Y2Y 가 실제로 0.39다).
+# 그래서 세 시리즈에 값이 모두 있는 가장 최근 날짜로 끊는다. 하루 늦더라도
+# 세 숫자가 서로 맞는 편이 낫다.
+COHERENT = {
+    "us10y":         ("DGS10",  "美 10년물 국채금리", "%"),
+    "us2y":          ("DGS2",   "美 2년물 국채금리",  "%"),
+    "spread_10y_2y": ("T10Y2Y", "10Y-2Y 금리차",     "%p"),
+}
 
-def fetch_latest(series_id):
-    """해당 시리즈의 '값이 있는' 가장 최근 (날짜, 값)을 돌려준다.
 
-    FRED CSV는 결측일을 '.'로 채우므로 뒤에서부터 숫자가 든 첫 행을 찾는다.
+def fetch_all(series_id):
+    """{날짜: 값} 전체. 결측일('.')은 뺀다.
+
     실패는 예외로 올리고 호출부가 지표 단위로 건너뛴다 — 추측값은 절대 만들지 않는다.
     """
     with urllib.request.urlopen(CSV_URL.format(series_id), timeout=TIMEOUT) as resp:
@@ -75,13 +90,32 @@ def fetch_latest(series_id):
     if not lines or not lines[0].lower().startswith("observation_date,"):
         raise ValueError(f"CSV 형식이 아님 (앞부분: {body[:60]!r})")
 
-    for line in reversed(lines[1:]):
+    out = {}
+    for line in lines[1:]:
         date, _, raw = line.partition(",")
         raw = raw.strip()
         if raw and raw != ".":
-            return date.strip(), float(raw)
+            out[date.strip()] = float(raw)
+    if not out:
+        raise ValueError("숫자가 든 행이 없음")
+    return out
 
-    raise ValueError("숫자가 든 행이 없음")
+
+def fetch_latest(series_id):
+    """해당 시리즈의 '값이 있는' 가장 최근 (날짜, 값). 날짜가 ISO 라 문자열 max 로 충분하다."""
+    data = fetch_all(series_id)
+    day = max(data)
+    return day, data[day]
+
+
+def fetch_coherent():
+    """검산 관계인 세 지표를 같은 날짜로 맞춰 받는다. (날짜, {키: 값})"""
+    data = {key: fetch_all(sid) for key, (sid, _, _) in COHERENT.items()}
+    common = set.intersection(*(set(v) for v in data.values()))
+    if not common:
+        raise ValueError("세 시리즈에 공통 날짜가 없음")
+    day = max(common)
+    return day, {key: data[key][day] for key in COHERENT}
 
 
 # ── 원/달러 환율 ────────────────────────────────────────────────────────────
@@ -115,18 +149,38 @@ FX_MAX_JUMP = 0.10                # 직전 기록 대비 10% 초과 = 쓰레기�
 FX_FRESH_HOURS = 30               # 이보다 묵었으면 stale 로 표시(주말 이월 허용)
 
 
-def _yahoo_krw():
-    """현물 시세. (기준일KST, 값, 출처, epoch) — 1순위."""
-    url = ("https://query1.finance.yahoo.com/v8/finance/chart/KRW=X"
-           "?interval=1d&range=5d")
+def _yahoo_quote(symbol):
+    """Yahoo 현물 시세. (기준일KST, 값, epoch).
+
+    asOf 를 응답의 epoch 에서 끌어내는 게 요점이다. 수집일을 그대로 기준일로
+    적으면 시장이 닫힌 날에도 '오늘 값' 이 생긴다 — dxy·vix·wti 가 그랬다.
+    """
+    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
+           f"{urllib.parse.quote(symbol)}?interval=1d&range=5d")
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-        meta = json.loads(resp.read().decode("utf-8", "replace"))
-    meta = meta["chart"]["result"][0]["meta"]
-    rate = float(meta["regularMarketPrice"])
+        payload = json.loads(resp.read().decode("utf-8", "replace"))
+    meta = payload["chart"]["result"][0]["meta"]
+    price = float(meta["regularMarketPrice"])
     epoch = int(meta["regularMarketTime"])
     as_of = datetime.datetime.fromtimestamp(epoch, KST).strftime("%Y-%m-%d")
+    return as_of, price, epoch
+
+
+def _yahoo_krw():
+    """원/달러 현물. (기준일, 값, 출처, epoch) — 1순위."""
+    as_of, rate, epoch = _yahoo_quote("KRW=X")
     return as_of, rate, "Yahoo:KRW=X", epoch
+
+
+def _weekdays_since(day, today):
+    """day(제외)부터 today(포함)까지의 평일 수. 주말 휴장을 감안한 신선도 판정용."""
+    n, cur = 0, day
+    while cur < today:
+        cur += datetime.timedelta(days=1)
+        if cur.weekday() < 5:
+            n += 1
+    return n
 
 
 def _erapi_krw():
@@ -214,6 +268,52 @@ def fetch_usdkrw():
     raise ValueError("모든 환율 소스 실패 — " + " / ".join(errors))
 
 
+# ── 현물 시세 지표 (dxy, vix, wti) ──────────────────────────────────────────
+# 원래 이 셋은 Claude 가 WebSearch 로 받았는데, asOf 를 무조건 '수집일' 로
+# 적고 있었다. 그래서 시장이 닫힌 주말에도 그날짜 값이 만들어졌다 — 실제
+# 기록을 보면 vix 가 09-12(토) 15.84, 09-13(일) 17.51 이고 wti 는 09-12(토)
+# 100.05 다. VIX 는 미국 정규장에서만 산출되고 토요일엔 값 자체가 없다.
+# 즉 금요일 종가이거나 출처 불명인 수치에 '오늘 기준' 딱지가 붙어 있었다.
+# 환율에서 겪은 것과 같은 병이라 같은 방식으로 고친다: 현물 시세 API 의
+# epoch 로 asOf 를 정하고, 검증을 통과한 값만 받는다.
+#
+# stale 판정이 지표마다 다른 이유: dxy·wti 는 사실상 24/5 로 거래되므로
+# '몇 시간 묵었나' 로 보면 되지만, VIX 는 정규장에서만 산출된다. VIX 를
+# 시간으로 재면 월요일 아침 KST 마다 52시간 묵은 금요일 종가가 걸려서 매주
+# "갱신 지연" 오탐이 난다. 그래서 VIX 만 영업일 기준으로 본다.
+SPOT = [
+    # (키, Yahoo심볼, 소수, 표시단위, 라벨, (하한, 상한), stale시간 또는 None=영업일)
+    ("dxy", "DX-Y.NYB", 2, "pt",    "달러 인덱스",    (50.0, 200.0), 30),
+    ("vix", "^VIX",     2, "pt",    "VIX 변동성지수", (5.0, 150.0),  None),
+    ("wti", "CL=F",     2, "$/bbl", "WTI 유가",      (5.0, 300.0),  30),
+]
+
+
+def fetch_spot(key, symbol, digits, unit, label, bounds, stale_hours):
+    """현물 지표 하나. 검증을 통과하지 못하면 예외 — 값을 만들어 내지 않는다."""
+    as_of, price, epoch = _yahoo_quote(symbol)
+
+    lo, hi = bounds
+    if not (lo <= price <= hi):
+        raise ValueError(f"범위 밖 값 {price} (허용 {lo}~{hi})")
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if stale_hours is not None:
+        stale = (now.timestamp() - epoch) / 3600.0 > stale_hours
+    else:
+        stale = _weekdays_since(datetime.date.fromisoformat(as_of),
+                                now.astimezone(KST).date()) > 1
+
+    return {
+        "label": label,
+        "asOf": as_of,
+        "value": round(price, digits),
+        "unit": unit,
+        "source": f"Yahoo:{symbol}",
+        "stale": stale,
+    }
+
+
 def main():
     out, failed = {}, []
 
@@ -234,6 +334,21 @@ def main():
             "unit": unit,
             "source": f"FRED:{series_id}",
         }
+
+    # 10Y·2Y·금리차는 셋이 서로 검산되므로 같은 날짜로 끊어서 받는다. 하나라도
+    # 실패하면 셋 다 건너뛴다 — 일부만 갱신하면 날짜가 다시 어긋나기 때문이다.
+    try:
+        day, values = fetch_coherent()
+        for key, (series_id, label, unit) in COHERENT.items():
+            out[key] = {
+                "label": label,
+                "asOf": day,
+                "value": round(values[key], 2),
+                "unit": unit,
+                "source": f"FRED:{series_id}",
+            }
+    except Exception as exc:                          # noqa: BLE001
+        failed.append(f"금리 3종(DGS10/DGS2/T10Y2Y): {exc}")
 
     # 기준금리는 하한/상한을 모두 받아야 의미가 있으므로 둘 중 하나라도 실패하면 통째로 건너뛴다.
     key, lo_id, hi_id, unit, label = FEDFUNDS
@@ -264,6 +379,15 @@ def main():
         }
     except Exception as exc:                          # noqa: BLE001
         failed.append(f"usdkrw: {exc}")
+
+    # 현물 시세 3종. 하나가 실패해도 나머지는 받는다 — 서로 검산 관계가 아니라서
+    # 날짜를 맞출 필요가 없다. 실패분은 파일에 없으니 prompt.txt 규칙에 따라
+    # 이전 값이 그대로 남는다.
+    for spec in SPOT:
+        try:
+            out[spec[0]] = fetch_spot(*spec)
+        except Exception as exc:                      # noqa: BLE001
+            failed.append(f"{spec[0]}({spec[1]}): {exc}")
 
     with open(OUT_PATH, "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, indent=2)

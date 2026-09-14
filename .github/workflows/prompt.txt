@@ -1,23 +1,28 @@
-너는 매일 GitHub Actions에서 자동 실행되는 완전 독립형 자동화 스크립트다. 현재 작업 디렉터리는 이미 git 저장소(macro-dashboard)의 루트이며, 여기 있는 index.html(공개 대시보드)과 data-log.json(전일대비/30일평균 계산용 데이터 로그)만 사용해서 완결적으로 처리한다. 19개 지표 중 14개는 워크플로가 이미 반영해 두었고, 너는 남은 5개만 맡는다.
+너는 매일 GitHub Actions에서 자동 실행되는 완전 독립형 자동화 스크립트다. 현재 작업 디렉터리는 이미 git 저장소(macro-dashboard)의 루트이며, 여기 있는 index.html(공개 대시보드)과 data-log.json(전일대비/30일평균 계산용 데이터 로그)만 사용해서 완결적으로 처리한다. 19개 지표 중 17개는 워크플로가 이미 반영해 두었고, 너는 남은 2개(fedwatch, nfp)만 맡는다.
 
 ## 절대 규칙: 비용 절감 (턴 수 × 컨텍스트 크기로 비용이 결정된다)
-- 검색이 필요한 지표는 **5개뿐**이다. 하나씩 순차 검색하지 말고 **한 메시지 안에 WebSearch 도구 호출 5개를 한꺼번에 묶어 병렬로 실행**한다. 순차 검색은 턴 수를 늘려 비용이 급증한다.
-- 나머지 14개는 이미 index.html과 data-log.json에 반영돼 있다. **검색도 수정도 하지 마라.**
+- 검색이 필요한 지표는 **2개뿐**이다. 하나씩 순차 검색하지 말고 **한 메시지 안에 WebSearch 도구 호출 2개를 한꺼번에 묶어 병렬로 실행**한다. 순차 검색은 턴 수를 늘려 비용이 급증한다.
+- 나머지 17개는 이미 index.html과 data-log.json에 반영돼 있다. **검색도 수정도 하지 마라.**
 - 30일 평균/표준편차 계산은 눈으로 하지 말고 Bash python3으로 처리해서 턴과 오류를 줄인다.
 - index.html 수정은 전체 재작성이 아니라 Edit로 필요한 부분만 치환한다.
 
-## 이미 반영된 14개 지표 — 다시 건드리지 마라
-워크플로가 너를 실행하기 전에 .github/scripts/update-dashboard.py 를 돌려, FRED가
-원본인 14개 지표를 index.html 과 data-log.json 에 **이미 반영해 두었다.** 값,
-delta-chip, trend-line, pill, 기준일까지 전부 들어가 있고, 01 섹션 타일뿐 아니라
-hero-grid 와 02·03 섹션의 해당 항목도 함께 동기화돼 있다.
+## 이미 반영된 17개 지표 — 다시 건드리지 마라
+워크플로가 너를 실행하기 전에 .github/scripts/update-dashboard.py 를 돌려, FRED와
+현물 시세 API가 원본인 17개 지표를 index.html 과 data-log.json 에 **이미 반영해
+두었다.** 값, delta-chip, trend-line, pill, 기준일까지 전부 들어가 있고, 01 섹션
+타일뿐 아니라 hero-grid 와 02·03 섹션의 해당 항목도 함께 동기화돼 있다.
 
-해당 지표(data-log.json 키): usdkrw, us10y, us2y, spread_10y_2y, fedfunds, sofr,
-tips10y_real, fed_balance_sheet, m2, rrp_balance, tga, hy_spread, jobless_claims,
-sahm_rule
+해당 지표(data-log.json 키): usdkrw, dxy, vix, wti, us10y, us2y, spread_10y_2y,
+fedfunds, sofr, tips10y_real, fed_balance_sheet, m2, rrp_balance, tga, hy_spread,
+jobless_claims, sahm_rule
 
-이 14개는 **검색하지도, 다시 계산하지도, 다시 쓰지도 마라.** 이미 최신이며 네가
+이 17개는 **검색하지도, 다시 계산하지도, 다시 쓰지도 마라.** 이미 최신이며 네가
 손대면 오히려 어긋난다.
+
+dxy·vix·wti 가 최근에 이 목록으로 옮겨왔다. 예전에는 네가 검색해서 채웠는데,
+asOf 를 무조건 '수집일' 로 적는 바람에 시장이 닫힌 주말에도 그날짜 값이 생겼다
+(vix 09-12(토) 15.84, 09-13(일) 17.51 같은 기록이 남아 있다). 지금은 스크립트가
+시세의 타임스탬프에서 기준일을 뽑아 쓴다. 다시 검색해서 덮어쓰지 마라.
 
 다만 사전 반영이 실패했을 수 있다(FRED 장애, 또는 패치 지점 불일치로 스크립트가
 중단한 경우). 판별법은 하나다 — data-log.json 의 해당 키 history 마지막 항목의
@@ -27,16 +32,16 @@ date 가 오늘(KST)이면 반영된 것이다. 오늘이 아닌 지표는 반�
 
 ## 작업 순서
 1. Read로 index.html(기존 디자인 템플릿)과 data-log.json 을 읽는다.
-2. dxy, vix, wti, fedwatch, nfp — **이 5개만** 아래 지표별 검색어/출처/상태기준대로 WebSearch(필요시 WebFetch)로 조사한다. 한 메시지에 5개를 묶어 병렬로 실행한다.
-3. 아래 전일 대비 delta-chip 로직과 30일 평균 trend-line 로직에 따라 **이 5개만** data-log.json과 index.html에 반영한다. 위 14개는 건드리지 않는다. index.html의 CSS/레이아웃/클래스명/섹션 구조는 절대 변경하지 않는다 — 오직 값/상태/날짜만 바꾼다.
+2. fedwatch, nfp — **이 2개만** 아래 지표별 검색어/출처/상태기준대로 WebSearch(필요시 WebFetch)로 조사한다. 한 메시지에 2개를 묶어 병렬로 실행한다.
+3. 아래 전일 대비 delta-chip 로직과 30일 평균 trend-line 로직에 따라 **이 2개만** data-log.json과 index.html에 반영한다. 위 17개는 건드리지 않는다. index.html의 CSS/레이아웃/클래스명/섹션 구조는 절대 변경하지 않는다 — 오직 값/상태/날짜만 바꾼다.
 4. Bash로 `date -u -d '+9 hours' '+%Y-%m-%d %H:%M'` 를 실행해서 정확한 KST(한국시간) 현재 시각을 구한다 (이 방법은 타임존 데이터베이스 없이도 항상 정확하다 — UTC에 9시간을 더하는 순수 계산이므로). 그 값으로 index.html의 updated-chip을 "마지막 갱신 <b>YYYY-MM-DD HH:MM</b> (KST)"로 갱신한다 (sched 배지는 건드리지 않음).
-5. data-log.json을 Write로 저장한다. 네가 맡은 5개 키의 history 에만 오늘 항목을 추가하고(최근 30개 유지), 나머지 14개 키는 이미 오늘 항목이 들어가 있으니 그대로 둔다.
+5. data-log.json을 Write로 저장한다. 네가 맡은 2개 키의 history 에만 오늘 항목을 추가하고(최근 30개 유지), 나머지 17개 키는 이미 오늘 항목이 들어가 있으니 그대로 둔다.
 6. git add나 git commit, git push는 절대 실행하지 않는다. 이건 이 스크립트를 호출한 GitHub Actions 워크플로가 별도로 담당한다. 너는 index.html과 data-log.json 파일을 디스크에 정확히 써두는 것까지만 하면 된다.
 7. 마지막 답변 맨 앞줄에 반드시 RESULT: DONE 이라는 문구로 시작한다. 그 다음 줄부터 오늘 갱신한 내용을 짧게 요약한다.
 
 ## 전일 대비 delta-chip 로직 (네가 맡은 5개 대상)
 data-log.json의 19개 키(series 아래에 있다): usdkrw, dxy, us10y, us2y, spread_10y_2y, fedfunds, sofr, tips10y_real, fed_balance_sheet, m2, rrp_balance, tga, vix, hy_spread, wti, fedwatch, nfp, jobless_claims, sahm_rule. 각 항목의 history 배열에 {date, asOf, value}를 추가한다 — date는 오늘(KST) 수집일, asOf는 그 데이터 자체의 기준일이다.
-네가 적용할 자리는 vix 의 hero-grid 타일, dxy·vix·wti 의 01 섹션 타일, fedwatch 의 02 check-right, nfp 의 03 check-right 다. 나머지 자리는 이미 반영돼 있으니 열어보지도 마라. RRP금리, 지급준비금, CDS 3개는 값이 없어 이전 링크형 버튼을 유지하고 delta-chip 대상이 아니다.
+네가 적용할 자리는 fedwatch 의 02 check-right, nfp 의 03 check-right 두 곳뿐이다. 나머지 자리는 이미 반영돼 있으니 열어보지도 마라. RRP금리, 지급준비금, CDS 3개는 값이 없어 이전 링크형 버튼을 유지하고 delta-chip 대상이 아니다.
 
 delta 값 우선순위: 1순위는 검색 결과 자체가 전일 대비 변동을 알려주면 그 값을 바로 쓰는 것이다(로그에 어제 기록이 없어도 됨). 2순위는 출처가 안 주면 data-log.json의 이전 기록과 비교하는 것이다. 3순위 최후 수단은 둘 다 없으면 delta-chip first 클래스로 최초 기록이라고 표시하는 것이다.
 색상 규칙: delta가 양수(상승)면 delta-chip up 클래스를 쓰고 위쪽 화살표와 플러스 부호로 표시한다(빨강, 한국 증시 관례). delta가 음수(하락)면 delta-chip down 클래스를 쓰고 아래쪽 화살표와 마이너스 부호로 표시한다(파랑). delta가 0이면 delta-chip flat 클래스를 쓰고 물결선과 변동없음 텍스트로 표시한다.
@@ -50,10 +55,11 @@ data-log.json 해당 키 배열 개수(오늘 포함)가 5 미만이면 trend-li
 [검색] 표시된 5개만 WebSearch로 조사한다.
 
 1. [완료] 원달러환율(usdkrw). 스크립트가 현물 시세(Yahoo KRW=X) → 참조환율(open.er-api.com) → 주간확정치(FRED DEXKOUS) 순으로 받아 이미 반영함. 검색하지 마라 — 검색 스니펫이 며칠 전 값을 되돌려 놓는 사고가 있었다. 항상 info 상태. 값이 묵었을 때는 스크립트가 "갱신 지연" 칩을 달아 두므로 그것도 건드리지 마라.
-2. [검색] 달러인덱스(dxy). 검색어: US Dollar Index DXY price today. 출처: https://kr.investing.com/indices/usdollar . 105 이상이면 강세, 100 미만이면 약세, 그 사이는 혼조, 클래스는 info.
+2. [완료] 달러인덱스(dxy). 스크립트가 현물 시세(Yahoo DX-Y.NYB)로 이미 반영함. 105 이상이면 강세, 100 미만이면 약세, 그 사이는 혼조, 클래스는 info. 검색하지 마라.
 3. [완료] 미국10년물국채금리(us10y). 출처: https://kr.investing.com/rates-bonds/u.s.-10-year-bond-yield . info.
 4. [완료] 미국2년물국채금리(us2y). 출처: https://fred.stlouisfed.org/series/DGS2 . info.
 5. [완료] 10Y-2Y금리차(spread_10y_2y). FRED T10Y2Y 공식 계열로 이미 반영됨. 양수면 good, 음수면 critical. 출처: https://indexergo.com/series/?detailId=13402&frq=D
+   ※ us10y·us2y·spread_10y_2y 는 스크립트가 **같은 날짜로 맞춰서** 넣는다. FRED 는 시리즈마다 발표 시점이 달라 각자 최신값을 쓰면 10Y − 2Y ≠ 금리차 가 되기 때문이다. 셋 중 하나만 따로 고치면 이 정합이 깨지니 절대 손대지 마라.
 6. [완료] 연준기준금리(fedfunds). 하한–상한 문자열로 이미 반영됨. 출처: https://indexergo.com/series/?detailId=14601&frq=D . info.
 7. [완료] SOFR금리(sofr). 출처: https://www.sofrrate.com/ . info.
 8. [완료] 실질금리(tips10y_real). 출처: https://fred.stlouisfed.org/series/DFII10 . info.
@@ -63,10 +69,10 @@ data-log.json 해당 키 배열 개수(오늘 포함)가 5 미만이면 trend-li
 12. RRP금리. 출처: https://indexergo.com/series/?detailId=14603&frq=D . 값이 없으면 이전 링크형 버튼 유지.
 13. 지급준비금. 출처: https://indexergo.com/series/?detailId=14103&frq=D . 값이 없으면 이전 링크형 버튼 유지.
 14. [완료] TGA잔고(tga). 출처: https://fred.stlouisfed.org/series/WDTGAL . info, 십억 달러 단위.
-15. [검색] VIX(vix). 검색어: VIX index level today. 출처: https://www.investing.com/indices/volatility-s-p-500 . 20 미만이면 good, 20에서 30이면 warn, 30 이상이면 critical.
+15. [완료] VIX(vix). 스크립트가 현물 시세(Yahoo ^VIX)로 이미 반영함. 20 미만이면 good, 20에서 30이면 warn, 30 이상이면 critical. 검색하지 마라 — VIX 는 미국 정규장에서만 산출돼서 주말에는 값 자체가 없다.
 16. CDS. 출처: https://en.macromicro.me/charts/68239/us-5year-cds . 값이 없으면 이전 링크형 버튼 유지.
 17. [완료] 하이일드스프레드(hy_spread). ICE BofA US High Yield OAS 를 bp 로 환산해 이미 반영됨. 출처: https://fred.stlouisfed.org/series/BAMLH0A0HYM2 . 400bp 미만이면 good, 400에서 700이면 warn, 700 이상이면 critical.
-18. [검색] WTI유가(wti). 검색어: WTI crude oil price today. 출처: https://oilprice.com/futures/wti/ . info.
+18. [완료] WTI유가(wti). 스크립트가 현물 시세(Yahoo CL=F)로 이미 반영함. info. 검색하지 마라.
 19. [검색] CME FedWatch(fedwatch). 검색어: CME FedWatch tool rate cut probability next FOMC meeting. 출처: https://www.cmegroup.com/ko/markets/interest-rates/cme-fedwatch-tool.html . info, 동결 확률과 인하 확률 둘 다 note에 적는다.
 
 값을 못 찾은 타일은 이전 값을 유지한다. 절대 추측하지 않는다. 갱신을 마치면 01 섹션 summary-row 카운트를 실제 pill 개수에 맞게 다시 센다 — 스크립트가 한 번 세어 두었지만 네가 5개를 바꾸면서 상태가 달라졌을 수 있다. hero-grid 는 vix 한 칸만 본문과 맞추면 된다(나머지 세 칸은 이미 맞다).

@@ -39,9 +39,12 @@ jobs:
       - name: Ensure we are on a real local branch (not detached HEAD)
         run: git checkout -B main origin/main
 
-      # 19개 지표 중 14개(FRED 13개 + 실시간 환율 1개)를 여기서 받는다.
-      # 여기서 받아두면 Claude 사용량을 전혀 쓰지 않고, 검색 스니펫을 파싱하는
-      # 것보다 값도 정확하다. Claude 가 맡는 몫은 5개로 줄어든다.
+      # 19개 지표 중 17개(FRED 13개 + 현물 시세 4개: 환율·달러인덱스·VIX·WTI)를
+      # 여기서 받는다. 여기서 받아두면 Claude 사용량을 전혀 쓰지 않고, 검색
+      # 스니펫을 파싱하는 것보다 값도 정확하다. 특히 매일 변하는 시장 가격은
+      # 검색으로 받으면 날짜가 뒤섞인다 — 환율이 사흘 전 값으로 되돌아가고,
+      # dxy·vix·wti 가 주말에도 '오늘 기준' 값을 만들던 게 그 때문이었다.
+      # Claude 가 맡는 몫은 판단이 필요한 2개(fedwatch, nfp)로 줄어든다.
       # continue-on-error: FRED 장애가 전체 실행을 실패시키면 안 된다.
       # prompt.txt 는 오늘 날짜가 안 들어온 지표를 "이전 값 유지"로 처리한다.
       - name: Collect FRED series (no Claude, no quota)

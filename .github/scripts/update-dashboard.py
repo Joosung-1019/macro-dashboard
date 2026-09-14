@@ -48,12 +48,22 @@ def pill_rrp(v):      return ("warn", "주의") if v < 50 else ("info", "정보"
 def pill_hy(v):       return ("good", "안정") if v < 400 else (("warn", "주의") if v <= 700 else ("critical", "경고"))
 def pill_jobless(v):  return ("good", "안정") if v <= 250 else (("warn", "주의") if v <= 300 else ("critical", "경고"))
 def pill_sahm(v):     return ("good", "안정") if v < 0.3 else (("warn", "주의") if v < 0.5 else ("critical", "경고"))
+def pill_vix(v):      return ("good", "안정") if v < 20 else (("warn", "주의") if v < 30 else ("critical", "경고"))
+# 달러인덱스는 클래스가 항상 info 이고 뒤 문구만 바뀐다(105↑ 강세, 100↓ 약세).
+def pill_dxy(v):      return ("info", "정보 · 강세") if v >= 105 else (("info", "정보 · 약세") if v < 100 else ("info", "정보 · 혼조"))
 
 SPEC = {
     # 환율은 값이 커서 천단위 쉼표를 쓴다(1,343.03). 웹검색이 사흘 전 값을
     # 되돌려 놓는 일이 있어 2026-09-13 에 스크립트 수집으로 옮겼다.
     "usdkrw":            dict(tile="원/달러 환율", hero="원/달러 환율",
                               dec=2, unit="KRW", trend=True, comma=True),
+    # dxy·vix·wti 는 Claude 가 검색으로 채우던 자리다. asOf 를 수집일로 적는
+    # 바람에 시장이 닫힌 주말에도 '오늘 기준' 값이 생겨서 스크립트로 옮겼다.
+    "dxy":               dict(tile="달러 인덱스 (DXY)", dec=2, unit="pt",
+                              trend=True, pill=pill_dxy),
+    "vix":               dict(tile="VIX (변동성지수)", hero="VIX 공포지수",
+                              dec=2, unit="pt", trend=True, pill=pill_vix),
+    "wti":               dict(tile="WTI 유가", dec=2, unit="$/bbl", trend=True),
     "us10y":             dict(tile="美 10년물 국채금리", check="10년물 국채금리",
                               dec=2, unit="%", cunit="%", trend=True),
     "us2y":              dict(tile="美 2년물 국채금리", dec=2, unit="%", trend=True),
@@ -307,16 +317,24 @@ def main():
     doc["meta"]["lastRun"] = (datetime.datetime.now(datetime.timezone.utc)
                               + datetime.timedelta(hours=9)).strftime("%Y-%m-%d %H:%M")
 
-    # 환율은 소스가 3단 폴백이라 '어느 경로로 받은 값인지' 가 사후 진단의 전부다.
-    # Actions 로그는 90일 뒤 사라지고 fred-latest.json 은 커밋되지 않으므로
-    # 여기에 남긴다. 값이 이상할 때 이 세 줄만 보면 원인이 갈린다.
-    fx = fred.get("usdkrw")
-    if fx:
-        doc["meta"]["fx"] = {
-            "source": fx.get("source", "?"),
-            "asOf": fx.get("asOf", "?"),
-            "stale": bool(fx.get("stale")),
-        }
+    # 현물 시세 지표는 외부 API 나 폴백 체인에서 오므로 '어느 경로로 받았고
+    # 얼마나 묵었나' 가 사후 진단의 전부다. Actions 로그는 90일 뒤 사라지고
+    # fred-latest.json 은 커밋되지 않으므로 여기에 남긴다.
+    doc["meta"].pop("fx", None)                 # 초기 형태(환율 전용) 정리
+    spot = {}
+    for k in ("usdkrw", "dxy", "vix", "wti"):
+        item = fred.get(k)
+        if item:
+            spot[k] = {
+                "source": item.get("source", "?"),
+                "asOf": item.get("asOf", "?"),
+                "stale": bool(item.get("stale")),
+            }
+    if spot:
+        doc["meta"]["spot"] = spot
+    # 10Y·2Y·금리차를 어느 날짜로 맞췄는지. 셋이 서로 검산되는지 볼 때 쓴다.
+    if "spread_10y_2y" in fred:
+        doc["meta"]["ratesAsOf"] = fred["spread_10y_2y"]["asOf"]
 
     open(INDEX, "w", encoding="utf-8").write(html)
     with open(LOG, "w", encoding="utf-8") as fh:
