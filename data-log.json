@@ -3,12 +3,30 @@
     "description": "매크로 지표 데스크 일일 자동 수집 로그 — 각 series.history는 오래된 순으로 정렬됨",
     "windowDays": 30,
     "createdAt": "2026-08-26 07:34",
-    "lastRun": "2026-09-14 09:29",
-    "fx": {
-      "source": "Yahoo:KRW=X",
-      "asOf": "2026-09-14",
-      "stale": false
-    }
+    "lastRun": "2026-09-14 09:43",
+    "spot": {
+      "usdkrw": {
+        "source": "Yahoo:KRW=X",
+        "asOf": "2026-09-14",
+        "stale": false
+      },
+      "dxy": {
+        "source": "Yahoo:DX-Y.NYB",
+        "asOf": "2026-09-14",
+        "stale": false
+      },
+      "vix": {
+        "source": "Yahoo:^VIX",
+        "asOf": "2026-09-12",
+        "stale": false
+      },
+      "wti": {
+        "source": "Yahoo:CL=F",
+        "asOf": "2026-09-14",
+        "stale": false
+      }
+    },
+    "ratesAsOf": "2026-09-10"
   },
   "series": {
     "usdkrw": {
@@ -128,7 +146,7 @@
         {
           "date": "2026-09-14",
           "asOf": "2026-09-14",
-          "value": 1346.08
+          "value": 1345.85
         }
       ]
     },
@@ -249,7 +267,7 @@
         {
           "date": "2026-09-14",
           "asOf": "2026-09-14",
-          "value": 99.09
+          "value": 99.17
         }
       ]
     },
@@ -611,8 +629,8 @@
         },
         {
           "date": "2026-09-14",
-          "asOf": "2026-09-11",
-          "value": 0.33
+          "asOf": "2026-09-10",
+          "value": 0.39
         }
       ]
     },
@@ -1579,8 +1597,8 @@
         },
         {
           "date": "2026-09-14",
-          "asOf": "2026-09-14",
-          "value": 17.51
+          "asOf": "2026-09-12",
+          "value": 15.84
         }
       ]
     },
@@ -1822,7 +1840,7 @@
         {
           "date": "2026-09-14",
           "asOf": "2026-09-14",
-          "value": 99.99
+          "value": 102.75
         }
       ]
     },
