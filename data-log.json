@@ -3,7 +3,12 @@
     "description": "매크로 지표 데스크 일일 자동 수집 로그 — 각 series.history는 오래된 순으로 정렬됨",
     "windowDays": 30,
     "createdAt": "2026-08-26 07:34",
-    "lastRun": "2026-09-14 09:10"
+    "lastRun": "2026-09-14 09:29",
+    "fx": {
+      "source": "Yahoo:KRW=X",
+      "asOf": "2026-09-14",
+      "stale": false
+    }
   },
   "series": {
     "usdkrw": {
@@ -122,8 +127,8 @@
         },
         {
           "date": "2026-09-14",
-          "asOf": "2026-09-13",
-          "value": 1343.03
+          "asOf": "2026-09-14",
+          "value": 1346.08
         }
       ]
     },
