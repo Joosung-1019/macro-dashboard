@@ -118,3 +118,14 @@ jobs:
       - name: Fail the run if the Claude step failed (for visibility)
         if: steps.claude_run.outcome == 'failure'
         run: exit 1
+
+      # 마지막에 데이터 자체를 점검한다. 여기까지 전부 success 여도 값이 묵어
+      # 있을 수 있는데, 그때 워크플로가 성공으로 끝나면 아침 알림이 "갱신 완료"
+      # 라고 가서 이상을 알 방법이 없다(2026-09-14 환율이 그랬다). 문제가 있으면
+      # 여기서 실행을 실패로 끝내 알림이 "부분갱신" 으로 바뀌게 한다.
+      #
+      # always(): 앞 단계가 실패해도 데이터 상태는 알려주는 게 낫다. 커밋은 이미
+      # 위에서 끝났으므로 여기서 실패해도 갱신분이 유실되지는 않는다.
+      - name: Health check (data freshness)
+        if: always()
+        run: python3 .github/scripts/health-check.py

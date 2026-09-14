@@ -146,7 +146,10 @@ UA = "Mozilla/5.0 (compatible; macro-dashboard/1.0)"
 # 좁게 잡으면 정작 봐야 할 날에 화면이 멈춘다.
 FX_MIN, FX_MAX = 500.0, 3000.0    # 단위 사고(134.6 / 13460) 감지
 FX_MAX_JUMP = 0.10                # 직전 기록 대비 10% 초과 = 쓰레기로 간주
-FX_FRESH_HOURS = 30               # 이보다 묵었으면 stale 로 표시(주말 이월 허용)
+# 36시간인 이유: 외환은 금 17:00 ET 에 닫고 일 17:00 ET 에 열린다. 일요일
+# 09:09 KST 실행은 토 20:09 ET 라 금요일 종가로부터 자연히 27시간이 지나 있다.
+# 30시간으로 잡으면 여유가 3시간뿐이라 매주 일요일 오탐 위험이 있다.
+FX_FRESH_HOURS = 36
 
 
 def _yahoo_quote(symbol):
@@ -309,9 +312,11 @@ SPOT = [
     # (키, Yahoo심볼, 소수, 표시단위, 라벨, (하한,상한), stale시간|None=영업일, 세션롤오버h)
     # 롤오버: CME 계열 선물은 18:00 ET 에 다음 거래일 세션이 열리므로 6 을 더해야
     # 거래일이 맞는다(일요일 저녁 시세 = 월요일 세션). VIX 는 현물 지수라 0 이다.
-    ("dxy", "DX-Y.NYB", 2, "pt",    "달러 인덱스",    (50.0, 200.0), 30,   6),
+    # 36시간: CME 선물도 금 17:00 ET 마감 → 일 18:00 ET 재개라 일요일 실행 때
+    # 금요일 종가로부터 27시간이 지나 있다. FX 와 같은 이유로 여유를 둔다.
+    ("dxy", "DX-Y.NYB", 2, "pt",    "달러 인덱스",    (50.0, 200.0), 36,   6),
     ("vix", "^VIX",     2, "pt",    "VIX 변동성지수", (5.0, 150.0),  None, 0),
-    ("wti", "CL=F",     2, "$/bbl", "WTI 유가",      (5.0, 300.0),  30,   6),
+    ("wti", "CL=F",     2, "$/bbl", "WTI 유가",      (5.0, 300.0),  36,   6),
 ]
 
 
@@ -420,13 +425,22 @@ def main():
         except Exception as exc:                      # noqa: BLE001
             failed.append(f"{spec[0]}({spec[1]}): {exc}")
 
+    # 실패 목록을 파일에 같이 남긴다. health-check.py 가 이걸 보고 실행을
+    # 실패로 표시할지 정한다 — 지표가 빠졌는데 워크플로가 success 로 끝나면
+    # 아침 알림이 "갱신 완료" 라고 가버린다.
+    # 키 앞의 '_' 는 지표가 아니라는 표시다. update-dashboard.py 는 SPEC 에
+    # 있는 키만 찾아 쓰므로 이 항목은 그냥 무시된다.
+    out["_meta"] = {"failed": failed}
+
     with open(OUT_PATH, "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, indent=2)
         fh.write("\n")
 
-    print(f"FRED 수집 완료: {len(out)}개 성공, {len(failed)}개 실패 -> {OUT_PATH}")
-    for k, v in out.items():
-        print(f"  {k:<18} {v['value']} {v['unit']}  (asOf {v['asOf']}, {v['source']})")
+    series_only = {k: v for k, v in out.items() if not k.startswith("_")}
+    print(f"FRED 수집 완료: {len(series_only)}개 성공, {len(failed)}개 실패 -> {OUT_PATH}")
+    for k, v in series_only.items():
+        mark = " [지연]" if v.get("stale") else ""
+        print(f"  {k:<18} {v['value']} {v['unit']}  (asOf {v['asOf']}, {v['source']}){mark}")
     for f in failed:
         print(f"  [실패] {f}")
 
