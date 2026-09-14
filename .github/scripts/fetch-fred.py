@@ -150,10 +150,11 @@ FX_FRESH_HOURS = 30               # 이보다 묵었으면 stale 로 표시(주�
 
 
 def _yahoo_quote(symbol):
-    """Yahoo 현물 시세. (기준일KST, 값, epoch).
+    """Yahoo 현물 시세. {price, epoch, gmtoffset, tzname}.
 
     asOf 를 응답의 epoch 에서 끌어내는 게 요점이다. 수집일을 그대로 기준일로
     적으면 시장이 닫힌 날에도 '오늘 값' 이 생긴다 — dxy·vix·wti 가 그랬다.
+    날짜 변환은 호출부가 한다. 지표마다 어느 시간대로 끊어야 맞는지가 다르다.
     """
     url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
            f"{urllib.parse.quote(symbol)}?interval=1d&range=5d")
@@ -161,16 +162,39 @@ def _yahoo_quote(symbol):
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         payload = json.loads(resp.read().decode("utf-8", "replace"))
     meta = payload["chart"]["result"][0]["meta"]
-    price = float(meta["regularMarketPrice"])
-    epoch = int(meta["regularMarketTime"])
-    as_of = datetime.datetime.fromtimestamp(epoch, KST).strftime("%Y-%m-%d")
-    return as_of, price, epoch
+    return {
+        "price": float(meta["regularMarketPrice"]),
+        "epoch": int(meta["regularMarketTime"]),
+        "gmtoffset": int(meta.get("gmtoffset", 0)),
+        "tzname": str(meta.get("exchangeTimezoneName", "?")),
+    }
+
+
+def _session_date(quote, roll_hours):
+    """시세가 속한 '거래 세션 날짜'. 거래소 현지 시각 기준으로 끊는다.
+
+    KST 로 끊으면 미국 정규장 종가가 하루 밀린다 — VIX 금요일 종가(16:15 ET)가
+    KST 로는 토요일 05:15 이라 "기준일 2026-09-12(토)" 가 찍혔다. 토요일에
+    VIX 값이 있을 리 없으니 오히려 숫자가 이상해 보인다.
+
+    roll_hours 는 선물의 세션 롤오버다. CME 계열은 18:00 ET 에 다음날 세션이
+    열리므로 6시간을 더해야 거래일이 맞는다(일요일 저녁 시세 = 월요일 세션).
+    현물 지수(VIX)는 롤오버가 없어 0 이다.
+    """
+    tz = datetime.timezone(datetime.timedelta(seconds=quote["gmtoffset"]))
+    local = datetime.datetime.fromtimestamp(quote["epoch"], tz)
+    return (local + datetime.timedelta(hours=roll_hours)).strftime("%Y-%m-%d")
 
 
 def _yahoo_krw():
-    """원/달러 현물. (기준일, 값, 출처, epoch) — 1순위."""
-    as_of, rate, epoch = _yahoo_quote("KRW=X")
-    return as_of, rate, "Yahoo:KRW=X", epoch
+    """원/달러 현물. (기준일, 값, 출처, epoch) — 1순위.
+
+    환율만 KST 로 끊는다. 서울 시장을 보는 지표이고 09:10 KST 실행 시점이
+    이미 당일 서울장 안이라 KST 날짜가 곧 거래일이다.
+    """
+    q = _yahoo_quote("KRW=X")
+    as_of = datetime.datetime.fromtimestamp(q["epoch"], KST).strftime("%Y-%m-%d")
+    return as_of, q["price"], "Yahoo:KRW=X", q["epoch"]
 
 
 def _weekdays_since(day, today):
@@ -282,27 +306,34 @@ def fetch_usdkrw():
 # 시간으로 재면 월요일 아침 KST 마다 52시간 묵은 금요일 종가가 걸려서 매주
 # "갱신 지연" 오탐이 난다. 그래서 VIX 만 영업일 기준으로 본다.
 SPOT = [
-    # (키, Yahoo심볼, 소수, 표시단위, 라벨, (하한, 상한), stale시간 또는 None=영업일)
-    ("dxy", "DX-Y.NYB", 2, "pt",    "달러 인덱스",    (50.0, 200.0), 30),
-    ("vix", "^VIX",     2, "pt",    "VIX 변동성지수", (5.0, 150.0),  None),
-    ("wti", "CL=F",     2, "$/bbl", "WTI 유가",      (5.0, 300.0),  30),
+    # (키, Yahoo심볼, 소수, 표시단위, 라벨, (하한,상한), stale시간|None=영업일, 세션롤오버h)
+    # 롤오버: CME 계열 선물은 18:00 ET 에 다음 거래일 세션이 열리므로 6 을 더해야
+    # 거래일이 맞는다(일요일 저녁 시세 = 월요일 세션). VIX 는 현물 지수라 0 이다.
+    ("dxy", "DX-Y.NYB", 2, "pt",    "달러 인덱스",    (50.0, 200.0), 30,   6),
+    ("vix", "^VIX",     2, "pt",    "VIX 변동성지수", (5.0, 150.0),  None, 0),
+    ("wti", "CL=F",     2, "$/bbl", "WTI 유가",      (5.0, 300.0),  30,   6),
 ]
 
 
-def fetch_spot(key, symbol, digits, unit, label, bounds, stale_hours):
+def fetch_spot(key, symbol, digits, unit, label, bounds, stale_hours, roll_hours):
     """현물 지표 하나. 검증을 통과하지 못하면 예외 — 값을 만들어 내지 않는다."""
-    as_of, price, epoch = _yahoo_quote(symbol)
+    q = _yahoo_quote(symbol)
+    price, epoch = q["price"], q["epoch"]
+    as_of = _session_date(q, roll_hours)
 
     lo, hi = bounds
     if not (lo <= price <= hi):
         raise ValueError(f"범위 밖 값 {price} (허용 {lo}~{hi})")
 
-    now = datetime.datetime.now(datetime.timezone.utc)
     if stale_hours is not None:
+        now = datetime.datetime.now(datetime.timezone.utc)
         stale = (now.timestamp() - epoch) / 3600.0 > stale_hours
     else:
+        # 영업일 기준. 비교 대상도 거래소 현지 '오늘' 이어야 한다 — KST 로 재면
+        # 시차 때문에 하루가 어긋난다.
+        tz = datetime.timezone(datetime.timedelta(seconds=q["gmtoffset"]))
         stale = _weekdays_since(datetime.date.fromisoformat(as_of),
-                                now.astimezone(KST).date()) > 1
+                                datetime.datetime.now(tz).date()) > 1
 
     return {
         "label": label,
