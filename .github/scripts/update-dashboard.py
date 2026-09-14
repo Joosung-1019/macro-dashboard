@@ -92,10 +92,24 @@ def num(v, dec, sign=False, comma=False):
     return f"{v:+{c}.{dec}f}" if sign else f"{v:{c}.{dec}f}"
 
 
-def delta_chip(cur, prev, dec, is_range=False):
-    """전일 대비 칩 HTML. prev 가 없으면 최초 기록으로 표기한다."""
+def delta_chip(cur, prev, dec, is_range=False, same_as_of=False, stale=False):
+    """전일 대비 칩 HTML.
+
+    stale / same_as_of 를 따로 두는 이유: 2026-09-14 에 환율 소스가 하루 묵은
+    값을 돌려줬는데 화면에는 "― 변동없음" 이 찍혔다. '오늘 시장이 안 움직였다'
+    와 '오늘 값을 못 받았다' 가 같은 문구로 보이면 숫자를 믿을 수 없게 된다.
+    둘을 갈라서 적는다.
+
+    stale      : 소스가 신선한 값을 주지 못했다 — 수집 실패에 준한다.
+    same_as_of : 기준일이 직전 기록과 같다 = 새 관측치가 없다. 주간·월간 계열
+                 (M2, Sahm, H.4.1)에서는 정상이고, 일간 계열에서는 지연 신호다.
+    """
+    if stale:
+        return '<span class="delta-chip stale">갱신 지연</span>'
     if prev is None:
         return '<span class="delta-chip first">최초 기록</span>'
+    if same_as_of:
+        return '<span class="delta-chip flat">기준일 동일</span>'
     if is_range:                       # 기준금리는 미드포인트로 판정한다
         if cur == prev:
             return '<span class="delta-chip flat">동결</span>'
@@ -178,12 +192,27 @@ def patch_tile(html, label, value_html, trend_html, as_of, pill):
     return html[:m.start()] + new + html[m.end():]
 
 
-def patch_hero(html, label, value_html):
-    m = re.search(rf'(<span class="label">{re.escape(label)}</span>\s*)'
-                  rf'(<span class="value">.*?</span></span>)', html, re.S)
-    if not m:
-        raise Abort(f'hero 타일 "{label}" 을 찾지 못함')
-    return html[:m.start(2)] + value_html + html[m.end(2):]
+def patch_hero(html, label, value_html, as_of=None):
+    """hero-grid 타일 하나. value 와, 날짜형 sub 라면 그 날짜까지 함께 맞춘다.
+
+    sub 를 함께 고치는 이유: 예전에는 value 만 갈아끼워서 hero 의 "2026-09-13 기준"
+    이 아래 타일의 "기준일 2026-09-04" 와 어긋난 채로 배포됐다. 화면에서 제일
+    먼저 보이는 자리가 제일 오래된 날짜를 달고 있으면 숫자 전체가 의심받는다.
+    """
+    blocks = [m for m in re.finditer(r'<div class="hero-tile">.*?</div>', html, re.S)
+              if f'<span class="label">{label}</span>' in m.group(0)]
+    if len(blocks) != 1:
+        raise Abort(f'hero 타일 "{label}": {len(blocks)}곳 매칭 (1곳이어야 함)')
+    m = blocks[0]
+    new = sub1(r'<span class="value">.*?</span></span>', value_html, m.group(0),
+               f"hero {label} value")
+    # sub 문구는 지표마다 성격이 다르다 — 금리차·VIX 는 날짜가 아예 없고,
+    # 기준금리는 데이터 기준일이 아니라 FOMC 날짜다. 'YYYY-MM-DD 기준' 형태인
+    # 것만 갈아끼우고 나머지는 손대지 않는다.
+    if as_of:
+        new = re.sub(r'(<span class="sub">)\d{4}-\d{2}-\d{2}( 기준)',
+                     rf'\g<1>{as_of}\g<2>', new, count=1)
+    return html[:m.start()] + new + html[m.end():]
 
 
 def patch_check(html, label, value_text, chip_html, pill):
@@ -233,6 +262,7 @@ def main():
         # 이전 값 — 오늘 기록이 이미 있으면(재실행) 그 앞의 것과 비교한다
         prior = [e for e in hist if e["date"] != today]
         prev = None
+        prev_as_of = prior[-1].get("asOf") if prior else None
         if prior:
             p = prior[-1]["value"]
             prev = _mid(p) if is_range else (p if isinstance(p, (int, float)) else None)
@@ -244,7 +274,9 @@ def main():
         del hist[:-WINDOW]
 
         dec = spec.get("dec", 2)
-        chip = delta_chip(cur_num, prev, dec, is_range)
+        chip = delta_chip(cur_num, prev, dec, is_range,
+                          same_as_of=(prev_as_of is not None and prev_as_of == as_of_log),
+                          stale=bool(item.get("stale")))
         pill = spec["pill"](cur_num) if spec.get("pill") else None
 
         if spec.get("tile"):
@@ -254,7 +286,7 @@ def main():
             trend = trend_line(hist, dec) if spec.get("trend") else None
             html = patch_tile(html, spec["tile"], value_html, trend, item["asOf"], pill)
             if spec.get("hero"):
-                html = patch_hero(html, spec["hero"], value_html)
+                html = patch_hero(html, spec["hero"], value_html, item["asOf"])
 
         if spec.get("check"):
             shown = raw if is_range else num(raw, dec, spec.get("sign", False), spec.get("comma", False))
@@ -274,6 +306,17 @@ def main():
 
     doc["meta"]["lastRun"] = (datetime.datetime.now(datetime.timezone.utc)
                               + datetime.timedelta(hours=9)).strftime("%Y-%m-%d %H:%M")
+
+    # 환율은 소스가 3단 폴백이라 '어느 경로로 받은 값인지' 가 사후 진단의 전부다.
+    # Actions 로그는 90일 뒤 사라지고 fred-latest.json 은 커밋되지 않으므로
+    # 여기에 남긴다. 값이 이상할 때 이 세 줄만 보면 원인이 갈린다.
+    fx = fred.get("usdkrw")
+    if fx:
+        doc["meta"]["fx"] = {
+            "source": fx.get("source", "?"),
+            "asOf": fx.get("asOf", "?"),
+            "stale": bool(fx.get("stale")),
+        }
 
     open(INDEX, "w", encoding="utf-8").write(html)
     with open(LOG, "w", encoding="utf-8") as fh:

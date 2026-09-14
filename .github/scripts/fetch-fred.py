@@ -7,9 +7,12 @@
 없이 CSV로 확정값을 받을 수 있으므로, 그만큼을 Claude 바깥으로 빼두면
 한도가 비어 있든 아니든 최소 13개는 매일 갱신된다.
 
-남는 6개(usdkrw, dxy, vix, wti, fedwatch, nfp)는 FRED에 없거나(dxy·fedwatch),
-FRED 값이 1~8일 지연돼 실시간 시세로서 의미가 떨어지거나(usdkrw·wti·vix),
-예상치 대비 판단이 필요해서(nfp) 그대로 Claude가 검색한다.
+환율(usdkrw)도 여기서 받지만 경로가 다르다. FRED에 DEXKOUS가 있긴 해도 H.10
+주간 발표라 최대 8일 밀려서 현물 시세로 쓸 수 없다. 그래서 별도 폴백 체인을
+둔다 — 아래 fetch_usdkrw 주석에 그동안 틀렸던 이력까지 적어 뒀다.
+
+남는 5개(dxy, vix, wti, fedwatch, nfp)는 FRED에 없거나(dxy·fedwatch), 실시간
+시세가 필요하거나(vix·wti), 예상치 대비 판단이 필요해서(nfp) Claude가 검색한다.
 
 출력은 저장소 루트의 fred-latest.json이며 커밋되지 않는다(.gitignore).
 prompt.txt가 이 파일을 Read해서 해당 지표의 검색을 건너뛴다.
@@ -18,6 +21,7 @@ prompt.txt가 이 파일을 Read해서 해당 지표의 검색을 건너뛴다.
 이 스크립트는 표시 형식을 바꾸지 않는다.
 """
 
+import datetime
 import json
 import sys
 import urllib.request
@@ -80,39 +84,134 @@ def fetch_latest(series_id):
     raise ValueError("숫자가 든 행이 없음")
 
 
-# 원/달러는 FRED(DEXKOUS)가 H.10 주간 발표라 최신값이 일주일까지 밀린다. 대시보드는
-# 현물 환율을 보여주는 자리이므로 실시간 API를 1순위로 쓰고, 그게 막히면 FRED로
-# 내려간다. 둘 다 실패하면 값을 만들지 않고 건너뛴다(이전 값 유지).
+# ── 원/달러 환율 ────────────────────────────────────────────────────────────
+# 이 지표만 수집 경로가 다른 이유는 나머지 13개와 달리 '오늘 이 시각의 시세'가
+# 필요하기 때문이다. 지금까지 두 번 틀렸고, 원인이 매번 달랐다.
 #
-# 이 지표를 스크립트로 옮긴 이유: 웹검색으로 받던 2026-09-10~13 동안 값이
-# 1386.01 → 1386.01 → 1341.25 → 1386.01 로 튀었다. 마지막 1386.01은 실제 시세
-# (약 1343)보다 43원 높은 사흘 전 값이 되돌아온 것이었다. 검색 스니펫은 날짜가
-# 불분명한 수치를 섞어 주므로 환율처럼 매일 변하는 값에는 쓰지 않는다.
-FX_URL = "https://open.er-api.com/v6/latest/USD"
+# (1) 웹검색(~2026-09-12): 09-10~13 값이 1386.01 → 1386.01 → 1341.25 → 1386.01 로
+#     튀었다. 검색 스니펫이 날짜 불분명한 사흘 전 수치를 섞어 준 탓이다.
+#     그래서 09-13 에 스크립트 수집으로 옮겼다.
+#
+# (2) open.er-api.com 단독(2026-09-13~14): 이건 '실시간 API' 가 아니라 하루 한 번
+#     (00:00 UTC 전후) 갱신되는 참조 환율이다. 워크플로는 00:09 UTC(09:09 KST)에
+#     도는데, 09-14 실행에서 이 API 가 돌려준 기준일은 09-13 이었다. 그래서
+#     09-14 기록이 09-13 값(1343.03) 그대로 남았다 — 09:10 KST 시점에 이미 33시간
+#     묵은 값이고, 화면에는 "― 변동없음" 으로 찍혀서 '오늘 안 움직였다' 와
+#     '오늘 값을 못 받았다' 가 구분되지 않았다.
+#
+# 결론: 1순위를 현물 시세로 바꾼다. Yahoo KRW=X 는 서울장(09:00~15:30 KST) 중에도
+# 계속 갱신되고 epoch 타임스탬프를 함께 주므로, 며칠짜리 날짜 비교가 아니라
+# '몇 시간 묵었는지' 로 신선도를 판정할 수 있다. 뒤의 둘은 성격이 다른 폴백이다:
+# er-api 는 하루 한 번 참조 환율, FRED 는 주간 확정치(최대 8일 지연)다.
+KST = datetime.timezone(datetime.timedelta(hours=9))
+UA = "Mozilla/5.0 (compatible; macro-dashboard/1.0)"
+
+# 검증 임계값. 이건 '시장이 그렇게 움직일 리 없다' 가 아니라 '파싱이 깨졌다' 를
+# 잡기 위한 것이다. 원/달러가 하루 10% 움직이는 위기 상황은 실재하므로, 진짜
+# 급등락을 걸러내고 대신 묵은 값을 보여주는 일이 없도록 밴드를 넓게 둔다.
+# 좁게 잡으면 정작 봐야 할 날에 화면이 멈춘다.
+FX_MIN, FX_MAX = 500.0, 3000.0    # 단위 사고(134.6 / 13460) 감지
+FX_MAX_JUMP = 0.10                # 직전 기록 대비 10% 초과 = 쓰레기로 간주
+FX_FRESH_HOURS = 30               # 이보다 묵었으면 stale 로 표시(주말 이월 허용)
+
+
+def _yahoo_krw():
+    """현물 시세. (기준일KST, 값, 출처, epoch) — 1순위."""
+    url = ("https://query1.finance.yahoo.com/v8/finance/chart/KRW=X"
+           "?interval=1d&range=5d")
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        meta = json.loads(resp.read().decode("utf-8", "replace"))
+    meta = meta["chart"]["result"][0]["meta"]
+    rate = float(meta["regularMarketPrice"])
+    epoch = int(meta["regularMarketTime"])
+    as_of = datetime.datetime.fromtimestamp(epoch, KST).strftime("%Y-%m-%d")
+    return as_of, rate, "Yahoo:KRW=X", epoch
+
+
+def _erapi_krw():
+    """하루 한 번 갱신되는 참조 환율. (기준일, 값, 출처, epoch) — 2순위."""
+    with urllib.request.urlopen(
+            "https://open.er-api.com/v6/latest/USD", timeout=TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8", "replace"))
+    rate = float(data["rates"]["KRW"])
+    # time_last_update_unix 가 있으면 그걸 쓰고, 없을 때만 문자열을 파싱한다.
+    epoch = data.get("time_last_update_unix")
+    if isinstance(epoch, (int, float)) and epoch > 0:
+        epoch = int(epoch)
+        as_of = datetime.datetime.fromtimestamp(epoch, KST).strftime("%Y-%m-%d")
+        return as_of, rate, "ER-API", epoch
+    stamp = data.get("time_last_update_utc", "")   # "Sun, 13 Sep 2026 00:02:31 +0000"
+    parts = stamp.split()
+    months = {m: i for i, m in enumerate(
+        "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(), 1)}
+    if len(parts) < 4 or parts[2] not in months:
+        raise ValueError(f"날짜 형식을 못 읽음: {stamp!r}")
+    as_of = f"{parts[3]}-{months[parts[2]]:02d}-{int(parts[1]):02d}"
+    return as_of, rate, "ER-API", None
+
+
+def _fred_krw():
+    """주간 확정치(H.10). 최대 8일 지연 — 최후 수단."""
+    as_of, raw = fetch_latest("DEXKOUS")
+    return as_of, raw, "FRED:DEXKOUS", None
+
+
+def _prev_usdkrw():
+    """data-log.json 에 남은 마지막 환율. 급변 판정 기준이 없으면 None."""
+    try:
+        with open("data-log.json", encoding="utf-8") as fh:
+            hist = json.load(fh)["series"]["usdkrw"]["history"]
+    except Exception:                                 # noqa: BLE001
+        return None
+    for entry in reversed(hist):
+        if isinstance(entry.get("value"), (int, float)):
+            return float(entry["value"])
+    return None
 
 
 def fetch_usdkrw():
-    """(기준일, 원/달러) 반환. 실시간 API -> FRED 순으로 시도한다."""
-    try:
-        with urllib.request.urlopen(FX_URL, timeout=TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8", "replace"))
-        rate = data["rates"]["KRW"]
-        # time_last_update_utc 예: "Sun, 13 Sep 2026 00:02:31 +0000"
-        stamp = data.get("time_last_update_utc", "")
-        as_of = ""
-        parts = stamp.split()
-        if len(parts) >= 4:
-            months = {m: i for i, m in enumerate(
-                "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(), 1)}
-            if parts[2] in months:
-                as_of = f"{parts[3]}-{months[parts[2]]:02d}-{int(parts[1]):02d}"
-        if not as_of:
-            raise ValueError(f"날짜 형식을 못 읽음: {stamp!r}")
-        return as_of, float(rate), "ER-API"
-    except Exception as fx_exc:                       # noqa: BLE001
-        as_of, raw = fetch_latest("DEXKOUS")          # 실패하면 예외가 그대로 올라간다
-        print(f"  (환율 실시간 API 실패 -> FRED 대체: {fx_exc})")
-        return as_of, raw, "FRED:DEXKOUS"
+    """(기준일, 값, 출처, stale여부) 반환.
+
+    현물 -> 참조환율 -> 주간확정치 순으로 시도하고, 각 후보를 검증에 통과해야
+    받아들인다. 검증에서 떨어진 후보는 다음 순위로 넘어간다 — 값을 고쳐 쓰거나
+    추측하지 않는다. 전부 실패하면 예외를 올려 호출부가 지표를 건너뛴다.
+    """
+    prev = _prev_usdkrw()
+    now = datetime.datetime.now(datetime.timezone.utc)
+    errors = []
+
+    for source in (_yahoo_krw, _erapi_krw, _fred_krw):
+        try:
+            as_of, rate, label, epoch = source()
+        except Exception as exc:                      # noqa: BLE001
+            errors.append(f"{source.__name__}: {exc}")
+            continue
+
+        # 검증 1 — 절대 범위. 단위가 어긋나거나 엉뚱한 필드를 읽었을 때 걸린다.
+        if not (FX_MIN <= rate <= FX_MAX):
+            errors.append(f"{label}: 범위 밖 값 {rate}")
+            continue
+
+        # 검증 2 — 직전 기록 대비 급변. 파싱 사고를 잡되 실제 급등락은 통과시킨다.
+        if prev and abs(rate - prev) / prev > FX_MAX_JUMP:
+            errors.append(f"{label}: 직전({prev}) 대비 {(rate/prev-1)*100:+.1f}% 급변")
+            continue
+
+        # 검증 3 — 신선도. 떨어뜨리지 않고 표시만 남긴다. 묵었더라도 아무것도
+        # 없는 것보다는 낫고, 대신 화면이 '지연' 이라고 밝히게 한다.
+        if epoch is not None:
+            stale = (now.timestamp() - epoch) / 3600.0 > FX_FRESH_HOURS
+        else:
+            age_days = (now.astimezone(KST).date()
+                        - datetime.date.fromisoformat(as_of)).days
+            stale = age_days >= 2
+
+        for err in errors:
+            print(f"  (환율 {err})")
+        return as_of, rate, label, stale
+
+    raise ValueError("모든 환율 소스 실패 — " + " / ".join(errors))
 
 
 def main():
@@ -152,15 +251,16 @@ def main():
     except Exception as exc:                          # noqa: BLE001
         failed.append(f"{key}({lo_id}/{hi_id}): {exc}")
 
-    # 원/달러 환율 (FRED 계열이 아니라 실시간 API 우선)
+    # 원/달러 환율 (FRED 계열이 아니라 현물 시세 우선)
     try:
-        fx_as_of, fx_rate, fx_src = fetch_usdkrw()
+        fx_as_of, fx_rate, fx_src, fx_stale = fetch_usdkrw()
         out["usdkrw"] = {
             "label": "원/달러 환율",
             "asOf": fx_as_of,
             "value": round(fx_rate, 2),
             "unit": "원",
             "source": fx_src,
+            "stale": fx_stale,
         }
     except Exception as exc:                          # noqa: BLE001
         failed.append(f"usdkrw: {exc}")

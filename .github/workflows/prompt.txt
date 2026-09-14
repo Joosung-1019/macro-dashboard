@@ -49,7 +49,7 @@ data-log.json 해당 키 배열 개수(오늘 포함)가 5 미만이면 trend-li
 [완료] 표시는 스크립트가 이미 반영해 둔 지표다 — 검색도 수정도 하지 마라. 아래 임계값은 참고용으로만 남겨 둔다.
 [검색] 표시된 5개만 WebSearch로 조사한다.
 
-1. [완료] 원달러환율(usdkrw). 실시간 환율 API(open.er-api.com, 실패 시 FRED DEXKOUS)로 스크립트가 이미 반영함. 검색하지 마라 — 검색 스니펫이 며칠 전 값을 되돌려 놓는 사고가 있었다. 항상 info 상태.
+1. [완료] 원달러환율(usdkrw). 스크립트가 현물 시세(Yahoo KRW=X) → 참조환율(open.er-api.com) → 주간확정치(FRED DEXKOUS) 순으로 받아 이미 반영함. 검색하지 마라 — 검색 스니펫이 며칠 전 값을 되돌려 놓는 사고가 있었다. 항상 info 상태. 값이 묵었을 때는 스크립트가 "갱신 지연" 칩을 달아 두므로 그것도 건드리지 마라.
 2. [검색] 달러인덱스(dxy). 검색어: US Dollar Index DXY price today. 출처: https://kr.investing.com/indices/usdollar . 105 이상이면 강세, 100 미만이면 약세, 그 사이는 혼조, 클래스는 info.
 3. [완료] 미국10년물국채금리(us10y). 출처: https://kr.investing.com/rates-bonds/u.s.-10-year-bond-yield . info.
 4. [완료] 미국2년물국채금리(us2y). 출처: https://fred.stlouisfed.org/series/DGS2 . info.

@@ -510,6 +510,9 @@
   .delta-chip.down { background: var(--info-bg); color: var(--info); }
   .delta-chip.flat { background: var(--todo-bg); color: var(--todo); }
   .delta-chip.first { background: var(--todo-bg); color: var(--todo); font-weight: 500; }
+  /* 값을 못 받아 이전 값이 그대로 남은 상태. 회색(flat)으로 두면 '변동없음'과
+     구분이 안 되므로 경고색을 쓴다 — 숫자를 믿기 전에 눈에 걸려야 한다. */
+  .delta-chip.stale { background: var(--warn-bg); color: var(--warn); font-weight: 500; }
   .check-right .delta-chip { margin-left: 0; }
 
   .tile .meta {
